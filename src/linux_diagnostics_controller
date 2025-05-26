@@ -1,3 +1,5 @@
+# linux_diagnostics/src/controller/main.py
+
 #!/usr/bin/env python3
 # Linux Diagnostics Controller Daemon
 
@@ -12,9 +14,7 @@ from logging.handlers import SysLogHandler
 
 CONTROLLER_VERSION = 1
 CONFIG_FILE = "./config.yaml"  # Replace with the actual path to your YAML config file
-# Uncomment the line below to specify a different config file
-# CONFIG_FILE = "/etc/linux_diagnostics/config.yaml"  # Replace with the actual path to your YAML config file
-OUTPUT_DIR = "./linux_diagnostics"  # Default output directory for diagnostics logs if not specified in the config
+OUTPUT_DIR = "/var/log/linux_diagnostics"  # Default output directory for diagnostics logs if not specified in the config
 PIDFILE = "/var/run/linux_diagnostics/controller.pid"  # Default PID file location
 DIAGNOSTICS_CMD = ["diagnostics_tool"]  # Replace with the actual diagnostics command
 
@@ -201,13 +201,11 @@ def main():
     
     # Now create the output directory and PID file
     output_dir = controller_config.get("output_directory", OUTPUT_DIR)
-    print(f"Output directory: {output_dir}")
     if not os.path.exists(output_dir):
         os.makedirs(output_dir)
         logger.info(f"Created output directory {output_dir}")
 
     pidfile = controller_config.get("pidfile", PIDFILE)
-    print(f"PID file: {pidfile}")
     pidfile_dir = os.path.dirname(pidfile)
     if not os.path.exists(pidfile_dir):
         os.makedirs(pidfile_dir)
@@ -237,11 +235,9 @@ def main():
     # Check for CPU and memory constraints in the configuration
     cpu_limit = controller_config.get("cpu_limit", 0)
     memory_limit = controller_config.get("memory_limit", 0)
-    print(f"CPU limit: {cpu_limit}, Memory limit: {memory_limit}")
     configure_cgroup_limits(cpu_limit, memory_limit)
     
     anomalies = controller_config.get("anomalies", {})
-    print(f"Anomalies to track: {anomalies}")
     if not anomalies:
         logger.error("No anomalies specified in the configuration. Exiting.")
         return
@@ -250,7 +246,6 @@ def main():
     if not monitors:
         logger.error("No monitors to run based on the specified anomalies. Exiting.")
         return
-    print(f"Monitors to run: {monitors}")
 
     try:
         while True:
