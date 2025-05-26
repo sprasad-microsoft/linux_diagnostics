@@ -11,7 +11,7 @@ from datetime import datetime
 from logging.handlers import SysLogHandler
 
 CONTROLLER_VERSION = 1
-CONFIG_FILE = "./config.yaml"  # Replace with the actual path to your YAML config file
+CONFIG_FILE = "./config_old.yaml"  # Replace with the actual path to your YAML config file
 # Uncomment the line below to specify a different config file
 # CONFIG_FILE = "/etc/linux_diagnostics/config.yaml"  # Replace with the actual path to your YAML config file
 OUTPUT_DIR = "./linux_diagnostics"  # Default output directory for diagnostics logs if not specified in the config
