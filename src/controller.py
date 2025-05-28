@@ -5,6 +5,31 @@ import warnings
 #import psutil
 from abc import ABC, abstractmethod
 
+# Define all SMB commands with their corresponding indices
+from types import MappingProxyType
+ALL_SMB_CMDS = MappingProxyType({
+    "SMB2_NEGOTIATE": 0,
+    "SMB2_SESSION_SETUP": 1,
+    "SMB2_LOGOFF": 2,
+    "SMB2_TREE_CONNECT": 3,
+    "SMB2_TREE_DISCONNECT": 4,
+    "SMB2_CREATE": 5,
+    "SMB2_CLOSE": 6,
+    "SMB2_FLUSH": 7,
+    "SMB2_READ": 8,
+    "SMB2_WRITE": 9,
+    "SMB2_LOCK": 10,
+    "SMB2_IOCTL": 11,
+    "SMB2_CANCEL": 12,
+    "SMB2_ECHO": 13,
+    "SMB2_QUERY_DIRECTORY": 14,
+    "SMB2_CHANGE_NOTIFY": 15,
+    "SMB2_QUERY_INFO": 16,
+    "SMB2_SET_INFO": 17,
+    "SMB2_OPLOCK_BREAK": 18,
+    "SMB2_SERVER_TO_CLIENT_NOTIFICATION": 19
+})
+
 # AODController
 class AODController:
     def __init__(self, mode, config_path, continuous=False):
@@ -54,6 +79,7 @@ class GuardianMode(RunModeStrategy):
 
     def __init__(self, config):
         self.config = config.get("Guardian", {})
+        self.timer = self.config.get("Timer")  # Ask for the default timer value and add it later
 
     def execute(self):
         print("Running in Guardian mode")
@@ -64,6 +90,9 @@ class GuardianMode(RunModeStrategy):
             print(f"Processing anomaly type: {anomaly_type}")
             parser = AnomalyParserFactory.get_parser(anomaly_type, section)
             parsed_config = parser.parse()
+            # ebpf launcher wont need all info in config
+            # should i only give what the ebpf launcher needs?
+            # this is encapsulation or smth right 
             ebpf_launcher = EBPFLauncherFactory.get_launcher(anomaly_type, parsed_config)
             ebpf_launcher.launch()
         #will handle ebpf launching and event dispatcher launching part later
@@ -193,29 +222,6 @@ class LatencyConfigParser(AnomalyConfigParser):
     
     def validate_smb_commands(self, track_commands, exclude_commands):
 
-        all_smb_cmds = {
-            "SMB2_NEGOTIATE": 0,
-            "SMB2_SESSION_SETUP": 1,
-            "SMB2_LOGOFF": 2,
-            "SMB2_TREE_CONNECT": 3,
-            "SMB2_TREE_DISCONNECT": 4,
-            "SMB2_CREATE": 5,
-            "SMB2_CLOSE": 6,
-            "SMB2_FLUSH": 7,
-            "SMB2_READ": 8,
-            "SMB2_WRITE": 9,
-            "SMB2_LOCK": 10,
-            "SMB2_IOCTL": 11,
-            "SMB2_CANCEL": 12,
-            "SMB2_ECHO": 13,
-            "SMB2_QUERY_DIRECTORY": 14,
-            "SMB2_CHANGE_NOTIFY": 15,
-            "SMB2_QUERY_INFO": 16,
-            "SMB2_SET_INFO": 17,
-            "SMB2_OPLOCK_BREAK": 18,
-            "SMB2_SERVER_TO_CLIENT_NOTIFICATION": 19
-        }
-
         # Handle missing TrackCommands (default to empty list)
         track_commands = track_commands if track_commands is not None else []
         exclude_commands = exclude_commands if exclude_commands is not None else []
@@ -230,28 +236,28 @@ class LatencyConfigParser(AnomalyConfigParser):
                 raise ValueError(f"Missing 'command' key in TrackCommands: {command}")
             try:
                 cmd = command["command"]
-                if cmd in all_smb_cmds:
-                    if present_track_cmds & (1 << all_smb_cmds[cmd]):
+                if cmd in ALL_SMB_CMDS:
+                    if present_track_cmds & (1 << ALL_SMB_CMDS[cmd]):
                         warnings.warn(f"Command {cmd} is duplicated in track commands.", UserWarning)
                         continue
                     if "threshold" in command and (not isinstance(command["threshold"], (int, float)) or command["threshold"] < 0):
                         raise ValueError(f"Invalid threshold value in track command: {command}")
-                    present_track_cmds |= (1 << all_smb_cmds[cmd])
+                    present_track_cmds |= (1 << ALL_SMB_CMDS[cmd])
                 else:
-                    raise ValueError(f"Command {cmd} not found in all_smb_cmds.")
+                    raise ValueError(f"Command {cmd} not found in ALL_SMB_CMDS.")
             except (TypeError, KeyError):
                 raise ValueError(f"Invalid track command format: {command}")
             
         #Check for duplicate exclude commands
         for cmd in exclude_commands:
             try:
-                if cmd in all_smb_cmds:
-                    if present_exclude_cmds & (1 << all_smb_cmds[cmd]):
+                if cmd in ALL_SMB_CMDS:
+                    if present_exclude_cmds & (1 << ALL_SMB_CMDS[cmd]):
                         warnings.warn(f"Command {cmd} is duplicated in exclude commands.", UserWarning)
                         continue 
-                    present_exclude_cmds |= (1 << all_smb_cmds[cmd])
+                    present_exclude_cmds |= (1 << ALL_SMB_CMDS[cmd])
                 else:
-                    raise ValueError(f"Command {cmd} not found in all_smb_cmds.")
+                    raise ValueError(f"Command {cmd} not found in ALL_SMB_CMDS.")
             except (TypeError, KeyError):
                 raise ValueError(f"Invalid exclude command format: {command}")
 
@@ -259,11 +265,11 @@ class LatencyConfigParser(AnomalyConfigParser):
         for command in exclude_commands:
             try:
                 cmd = command
-                if cmd in all_smb_cmds:
-                    if present_track_cmds & (1 << all_smb_cmds[cmd]):
+                if cmd in ALL_SMB_CMDS:
+                    if present_track_cmds & (1 << ALL_SMB_CMDS[cmd]):
                         raise ValueError(f"Command {cmd} is duplicated in track or exclude commands. It is unclear if Command {cmd} should be tracked or excluded.")
                 else:
-                    raise ValueError(f"Command {cmd} not found in all_smb_cmds.")
+                    raise ValueError(f"Command {cmd} not found in ALL_SMB_CMDS.")
             except (TypeError, KeyError):
                 raise ValueError(f"Invalid exclude command format: {command}")
 
@@ -307,9 +313,31 @@ class EBPFLauncher(ABC):
 # eBPF Launcher for Latency
 class LatencyEBPFLauncher(EBPFLauncher):
     def launch(self):
-        # Example: Use config to launch latency eBPF program
-        print("Launching Latency eBPF with config:", self.config)
-        # TODO: Add actual launch logic here
+        print("Launching Latency eBPF")
+        #We may need to create a seperate process or run this cmd or whatever
+        #I will do that later after i get the architecture
+        #for now, i'll only think abt what cmd im supposed to run
+
+        self.tool = self.config.get("tool")
+        #for now im assuming which ever tool we use will have same parameter format as smbslower
+
+        self.default_threshold = self.config.get("default_threshold")
+        min_threshold = self.default_threshold
+        #iterate over the command map and get the min threshold
+        for command, threshold in self.config.get("command_map", {}).items():
+            if threshold < min_threshold:
+                min_threshold = threshold
+
+        #now ill decide which cmds to include in the search
+        #i will assume only the -c parameter is working and -x doesnt work
+        #iterate over the command map and get the commands to include
+        include_commands = []
+        for command, threshold in self.config.get("command_map", {}).items():
+            include_commands.append(ALL_SMB_CMDS[command])
+
+        cmd = f"{self.tool} -m {min_threshold} -c {','.join(map(str, include_commands))}"
+        print(f"Running command: {cmd}")
+        
 
 # eBPF Launcher for Error
 class ErrorEBPFLauncher(EBPFLauncher):
