@@ -1,7 +1,8 @@
 import argparse
 import yaml
 import os
-import psutil
+import warnings
+#import psutil
 from abc import ABC, abstractmethod
 
 # AODController
@@ -26,6 +27,8 @@ class AODController:
 
     def run(self):
         self.load_config()
+        if not self.config:
+            raise ValueError("Configuration not loaded. Please check the config path.")
         self.select_strategy()
         self.strategy.execute()
 
@@ -48,11 +51,21 @@ class RunModeStrategy(ABC):
         pass
 
 class GuardianMode(RunModeStrategy):
+
+    def __init__(self, config):
+        self.config = config.get("Guardian", {})
+
     def execute(self):
+        print("Running in Guardian mode")
         anomalies = self.config.get("Anomalies", {})
+        if not anomalies:
+            raise ValueError("No anomalies configured in the YAML file.")
         for anomaly_type, section in anomalies.items():
+            print(f"Processing anomaly type: {anomaly_type}")
             parser = AnomalyParserFactory.get_parser(anomaly_type, section)
-        
+            parsed_config = parser.parse()
+            ebpf_launcher = EBPFLauncherFactory.get_launcher(anomaly_type, parsed_config)
+            ebpf_launcher.launch()
         #will handle ebpf launching and event dispatcher launching part later
 
 class WatcherMode(RunModeStrategy):
@@ -119,10 +132,10 @@ class LatencyConfigParser(AnomalyConfigParser):
 
         # Validate latency mode constraints
         if self.latency_mode == "trackonly" and exclude_commands:
-            raise ValueError("Cannot have exclude commands in trackonly mode.")
+            warnings.warn("Exclude commands will be ignored in trackonly mode.")
             exclude_commands = []
         elif self.latency_mode == "excludeonly" and track_commands:
-            raise ValueError("Cannot have track commands in excludeonly mode.")
+            warnings.warn("Track commands will be ignored in excludeonly mode.")
             track_commands = []
         
         # Validate and filter commands
@@ -133,19 +146,21 @@ class LatencyConfigParser(AnomalyConfigParser):
             self.command_map[command] = self.default_threshold
 
         # Apply latency mode operations
-            if self.latency_mode == "all":
-                self.track_modif(track_commands)    #so that we dont raise error if track_command is also an exclude_command, im doing track_modif first
-                self.exclude_some(exclude_commands)
-            elif self.latency_mode == "trackonly":
-                self.create_new_track(track_commands)
-            elif self.latency_mode == "excludeonly":
-                self.exclude_some(exclude_commands)
-            else:
-                raise ValueError("Invalid latency mode. Must be 'all', 'trackonly', or 'excludeonly'.")
+        if self.latency_mode == "all":
+            self.track_modif(track_commands)    #so that we dont raise error if track_command is also an exclude_command, im doing track_modif first
+            self.exclude_some(exclude_commands)
+            print("oof")
+        elif self.latency_mode == "trackonly":
+            self.create_new_track(track_commands)
+        elif self.latency_mode == "excludeonly":
+            self.exclude_some(exclude_commands)
+        else:
+            raise ValueError("Invalid latency mode. Must be 'all', 'trackonly', or 'excludeonly'.")
 
         # return tool, acceptable percentage, default threshold, and command map
         self.acceptable_percentage = self.config.get("AcceptablePercentage")
         self.tool = self.config.get("Tool")
+        self.actions = self.config.get("Actions", {})
 
         #only for degugging purposes
         print(f"Tool: {self.tool}, Acceptable Percentage: {self.acceptable_percentage}, Default Threshold: {self.default_threshold}")
@@ -154,6 +169,21 @@ class LatencyConfigParser(AnomalyConfigParser):
         print("{:<30} {:<10}".format("Command", "Threshold"))
         for command, threshold in self.command_map.items():
             print("{:<30} {:<10}".format(command, threshold))
+
+        #can u help me improve the return statement, i want to return a dictionary with
+        # 1. tool
+        # 2. acceptable percentage
+        # 3. default threshold
+        # 4. command map
+        # 5. actions (track_modif, exclude_some, create_new_track)
+        return {
+            "tool": self.tool,
+            "acceptable_percentage": self.acceptable_percentage,
+            "default_threshold": self.default_threshold,
+            "command_map": self.command_map,
+            "actions": self.actions
+        }
+
 
         return {
             self.tool, self.acceptable_percentage, self.default_threshold, self.command_map
@@ -191,20 +221,8 @@ class LatencyConfigParser(AnomalyConfigParser):
         exclude_commands = exclude_commands if exclude_commands is not None else []
 
         # Use an integer where 2^i indicates if i-th command is present
-        present_cmds = 0
+        present_track_cmds = 0
         present_exclude_cmds = 0
-
-        #Check for duplicate exclude commands
-        for cmd in exclude_commands:
-            try:
-                if cmd in all_smb_cmds:
-                    if present_exclude_cmds & (1 << all_smb_cmds[cmd]):
-                        raise ValueError(f"Command {cmd} is duplicated in exclude commands.")
-                    present_exclude_cmds |= (1 << all_smb_cmds[cmd])
-                else:
-                    raise ValueError(f"Command {cmd} not found in all_smb_cmds.")
-            except (TypeError, KeyError):
-                raise ValueError(f"Invalid exclude command format: {command}")
 
         #Checks for duplicate track commands
         for command in track_commands:
@@ -213,24 +231,37 @@ class LatencyConfigParser(AnomalyConfigParser):
             try:
                 cmd = command["command"]
                 if cmd in all_smb_cmds:
-                    if present_cmds & (1 << all_smb_cmds[cmd]):
-                        raise ValueError(f"Command {cmd} is duplicated in track commands.")
+                    if present_track_cmds & (1 << all_smb_cmds[cmd]):
+                        warnings.warn(f"Command {cmd} is duplicated in track commands.", UserWarning)
+                        continue
                     if "threshold" in command and (not isinstance(command["threshold"], (int, float)) or command["threshold"] < 0):
                         raise ValueError(f"Invalid threshold value in track command: {command}")
-                    present_cmds |= (1 << all_smb_cmds[cmd])
+                    present_track_cmds |= (1 << all_smb_cmds[cmd])
                 else:
                     raise ValueError(f"Command {cmd} not found in all_smb_cmds.")
             except (TypeError, KeyError):
                 raise ValueError(f"Invalid track command format: {command}")
             
+        #Check for duplicate exclude commands
+        for cmd in exclude_commands:
+            try:
+                if cmd in all_smb_cmds:
+                    if present_exclude_cmds & (1 << all_smb_cmds[cmd]):
+                        warnings.warn(f"Command {cmd} is duplicated in exclude commands.", UserWarning)
+                        continue 
+                    present_exclude_cmds |= (1 << all_smb_cmds[cmd])
+                else:
+                    raise ValueError(f"Command {cmd} not found in all_smb_cmds.")
+            except (TypeError, KeyError):
+                raise ValueError(f"Invalid exclude command format: {command}")
+
         # Check for duplicate commands between track and exclude
         for command in exclude_commands:
             try:
                 cmd = command
                 if cmd in all_smb_cmds:
-                    if present_cmds & (1 << all_smb_cmds[cmd]):
-                        raise ValueError(f"Command {cmd} is duplicated in track or exclude commands.")
-                    present_cmds |= (1 << all_smb_cmds[cmd])
+                    if present_track_cmds & (1 << all_smb_cmds[cmd]):
+                        raise ValueError(f"Command {cmd} is duplicated in track or exclude commands. It is unclear if Command {cmd} should be tracked or excluded.")
                 else:
                     raise ValueError(f"Command {cmd} not found in all_smb_cmds.")
             except (TypeError, KeyError):
@@ -245,6 +276,7 @@ class LatencyConfigParser(AnomalyConfigParser):
 
     def track_modif(self, track_commands):
         """Modify tracked commands' thresholds."""
+        #We consider the threshold specified by the last track command in case of duplicates
         for command in track_commands:
             cmd = command.get("command")
             threshold = command.get("threshold", self.default_threshold)
@@ -263,15 +295,51 @@ class ErrorConfigParser(AnomalyConfigParser):
         # Placeholder for error-specific logic
         return {}
 
+# eBPF Launcher Base Class
+class EBPFLauncher(ABC):
+    def __init__(self, config):
+        self.config = config
+
+    @abstractmethod
+    def launch(self):
+        pass
+
+# eBPF Launcher for Latency
+class LatencyEBPFLauncher(EBPFLauncher):
+    def launch(self):
+        # Example: Use config to launch latency eBPF program
+        print("Launching Latency eBPF with config:", self.config)
+        # TODO: Add actual launch logic here
+
+# eBPF Launcher for Error
+class ErrorEBPFLauncher(EBPFLauncher):
+    def launch(self):
+        print("Launching Error eBPF with config:", self.config)
+        # TODO: Add actual launch logic here
+
+# eBPF Launcher Factory
+class EBPFLauncherFactory:
+    @staticmethod
+    def get_launcher(anomaly_type, config):
+        if anomaly_type == "Latency":
+            return LatencyEBPFLauncher(config)
+        elif anomaly_type == "Error":
+            return ErrorEBPFLauncher(config)
+        else:
+            raise ValueError(f"Unsupported anomaly type for eBPF: {anomaly_type}")
+
+
+
 # Main Entry Point
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     parser.add_argument("mode", choices=["Guardian", "Watcher"])
-    parser.add_argument("--config", default="config.yaml")
+    # this file is in a folder called src, config.yaml is in a sibling folder called config
+    parser.add_argument("--config-path", default=os.path.join(os.path.dirname(__file__), "../config/config.yaml"))
     parser.add_argument("--continuous", action="store_true")
     args = parser.parse_args()
 
-    controller = AODController(mode=args.mode, config_path=args.config, continuous=args.continuous)
+    controller = AODController(mode=args.mode, config_path=args.config_path, continuous=args.continuous)
     try:
         controller.run()
     except Exception as e:
