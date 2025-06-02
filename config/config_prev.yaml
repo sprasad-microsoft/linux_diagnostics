@@ -1,0 +1,45 @@
+Watcher:
+  Actions:
+    - tcpdump
+    - dmesg
+    - journalctl
+    - debugdata
+    - stats
+
+Guardian:
+  Timer: 1                            # seconds between checks
+  Anomalies:
+
+    Error:
+      Type: "Error"
+      Tool: "smbiosnoop"
+      Mode: "trackonly"               # Options: all, trackonly, excludeonly
+      AcceptablePercentage: 10        # % of error responses in X seconds
+      TrackCodes:                     # Error codes to track
+        - EACCES
+        - EAGAIN
+        - EIO
+      # ExcludeCodes:                 # Error codes to exclude, should not be used with mode trackonly
+      #   - ENOENT
+      Actions:
+        - dmesg
+        - journalctl
+
+    # Refer to the note below for more info
+    Latency:
+      Type: "Latency"
+      Tool: "smbslower"
+      Mode: "all"               # Options: all, trackonly, excludeonly
+      AcceptablePercentage: 5         # % of commands that can be slow
+      DefaultThreshold: 10            # milliseconds, by default applies to all commands
+      TrackCommands:                  # Overrride: only trace these commands
+        - command: SMB2_CREATE        # Apply DefaultThreshold when no threshold provided
+        - command: SMB2_READ
+          threshold: 8
+      ExcludeCommands:                # Exclude these commands and trace the rest
+        - SMB2_WRITE
+        - SMB2_FLUSH
+      Actions:
+        - debugdata
+        - stats
+# ** Use either TrackCommands (trackonly) or ExcludeCommands (excludeonly). Mode type will determine which one is used. With Mode type all, track commands with the given thresholds, track other commands with the default threshold, and ignore the excluded commands. 
