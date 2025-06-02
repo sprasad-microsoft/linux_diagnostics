@@ -8,6 +8,12 @@ import traceback
 import yaml
 import warnings
 import signal
+import platform
+import re
+import struct
+import ctypes
+import mmap
+import numpy as np
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -253,16 +259,150 @@ class ConfigManager:
         
         return self.get_track_codes(error_mode, error_codes, track_codes, exclude_codes)
 
+SHM_NAME = "/bpf_shm"
+TASK_COMM_LEN = 16
+
+HEAD_TAIL_BYTES = 8 if platform.architecture()[0] == '64bit' else 4
+
+# def get_define_value(header_path, macro):
+#     with open(header_path) as f:
+#         for line in f:
+#             m = re.match(rf'#define\s+{macro}\s+(\d+)', line)
+#             if m:
+#                 return int(m.group(1))
+#     raise ValueError(f"{macro} not found in {header_path}")
+
+# SMBDIAG_HEADER = os.path.join(os.path.dirname(__file__), "smbdiag.h")
+# MAX_ENTRIES = get_define_value(SMBDIAG_HEADER, "MAX_ENTRIES")
+# PAGE_SIZE = get_define_value(SMBDIAG_HEADER, "PAGE_SIZE")
+#above stuff will work after we get the ebpf script, for now, just write manually
+MAX_ENTRIES = 2048  # Example value, replace with actual
+PAGE_SIZE = 4096  # Example value, replace with actual
+
+SHM_SIZE = ((MAX_ENTRIES + 1) * PAGE_SIZE)
+SHM_DATA_SIZE = (SHM_SIZE//1000 - 2 * HEAD_TAIL_BYTES)  # delete /10 later
+class Metrics(ctypes.Union):
+    _fields_ = [
+        ("latency_ns", ctypes.c_ulonglong),
+        ("retval", ctypes.c_int)
+    ]
+
+class Event(ctypes.Structure):
+    _fields_ = [
+        ("pid", ctypes.c_int),
+        ("cmd_end_time_ns", ctypes.c_ulonglong),
+        ("session_id", ctypes.c_ulonglong),
+        ("mid", ctypes.c_ulonglong),
+        ("smbcommand", ctypes.c_ushort),
+        ("metric", Metrics),
+        ("tool", ctypes.c_ubyte),
+        ("is_compounded", ctypes.c_ubyte),
+        ("task", ctypes.c_char * TASK_COMM_LEN)
+    ]
+
+event_dtype = np.dtype([
+    ('pid', np.int32),
+    ('cmd_end_time_ns', np.uint64),
+    ('session_id', np.uint64),
+    ('mid', np.uint64),
+    ('smbcommand', np.uint16),
+    ('metric_latency_ns', np.uint64),
+    ('tool', np.uint8),
+    ('is_compounded', np.uint8),
+    ('task', f'S{TASK_COMM_LEN}')
+], align=True)
+
 class EventDispatcher:
     def __init__(self, controller):
         self.controller = controller
+        created = False
+        shm_path = f"/dev/shm{SHM_NAME}"
+        try:
+            self.fd = os.open(shm_path, os.O_RDWR)
+        except FileNotFoundError:
+            # Try to create if not found
+            self.fd = os.open(shm_path, os.O_RDWR | os.O_CREAT, 0o666)
+            created = True
+        except Exception as e:
+            print(f"Failed to open shared memory: {e}")
+            raise
 
+        if created:
+            try:
+                os.ftruncate(self.fd, SHM_SIZE)
+            except Exception as e:
+                print(f"Failed to set size of shared memory: {e}")
+                os.close(self.fd)
+                raise
+
+        try:
+            self.m = mmap.mmap(self.fd, SHM_SIZE, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ | mmap.PROT_WRITE)
+        except Exception as e:
+            print(f"Failed to map shared memory: {e}")
+            os.close(self.fd)
+            raise
     def run(self):
         print("EventDispatcher started running")
         while not self.controller.stop_event.is_set():
-            time.sleep(1)  # Simulate polling
-            event = {"event": "dummy_event"}
-            self.controller.eventQueue.put(event)
+            raw_events = self._poll_shm_buffer()
+            batch = self._parse(raw_events)
+            if batch is not None and len(batch) > 0:
+                self.controller.eventQueue.put(batch)
+            time.sleep(1)  # Adjust as needed
+
+    def _poll_shm_buffer(self) -> bytes:
+        """Fetch a batch of raw events from shared memory."""
+        self.m.seek(0)
+        head = struct.unpack_from("<Q", self.m, 0)[0]
+        tail = struct.unpack_from("<Q", self.m, 8)[0]
+        print(f"[AOD] head={head}, tail={tail}")
+        event_size = ctypes.sizeof(Event)
+        events = []
+
+        if tail == head:
+            return b''
+
+        if tail < head:
+            available = head - tail
+            count = available // event_size
+            offset = tail % SHM_DATA_SIZE
+            self.m.seek(2 * HEAD_TAIL_BYTES + offset)
+            raw = self.m.read(count * event_size)
+            tail = (tail + count * event_size) % SHM_DATA_SIZE
+            self._update_tail(tail)
+            return raw
+        else:
+            # Wrap-around case
+            available = (SHM_DATA_SIZE - tail) + head
+            offset = tail % SHM_DATA_SIZE
+            bytes_to_end = SHM_DATA_SIZE - offset
+            self.m.seek(2 * HEAD_TAIL_BYTES + offset)
+            raw1 = self.m.read(bytes_to_end)
+            self.m.seek(2 * HEAD_TAIL_BYTES)
+            raw2 = self.m.read(head)
+            tail = (tail + available) % SHM_DATA_SIZE
+            self._update_tail(tail)
+            return raw1 + raw2
+
+    def _update_tail(self, tail):
+        self.m.seek(8)
+        self.m.write(struct.pack("<Q", tail))
+        self.m.flush()
+
+    def _parse(self, raw: bytes):
+        """Convert raw struct bytes to a numpy array of events (batch)."""
+        if not raw:
+            return None
+        return np.frombuffer(raw, dtype=event_dtype)
+
+    def cleanup(self):
+        try:
+            self.m.close()
+            os.close(self.fd)
+            os.unlink(f"/dev/shm{SHM_NAME}")
+            print("EventDispatcher: Shared memory cleaned up")
+        except OSError as e:
+            print(f"EventDispatcher: Error cleaning up shared memory: {e}")
 
 class AnomalyWatcher:
     def __init__(self, controller):
@@ -274,8 +414,21 @@ class AnomalyWatcher:
         while not self.controller.stop_event.is_set():
             time.sleep(self.interval)
             try:
-                event = self.controller.eventQueue.get(timeout=1)
-                action = {"anomaly": "latency", "timestamp": time.time(), "event": event}
+                batch = self.controller.eventQueue.get(timeout=1)
+                # Iterate and print each event in the batch
+                for event in batch:
+                    print({
+                        "pid": int(event['pid']),
+                        "cmd_end_time_ns": int(event['cmd_end_time_ns']),
+                        "session_id": int(event['session_id']),
+                        "mid": int(event['mid']),
+                        "smbcommand": int(event['smbcommand']),
+                        "metric_latency_ns": int(event['metric_latency_ns']),
+                        "tool": int(event['tool']),
+                        "is_compounded": int(event['is_compounded']),
+                        "task": event['task'].decode(errors='ignore').strip()
+                    })
+                action = {"anomaly": "latency", "timestamp": time.time(), "event": batch}
                 self.controller.anomalyActionQueue.put(action)
             except queue.Empty:
                 continue
@@ -289,7 +442,7 @@ class LogCollectorManager:
         while not self.controller.stop_event.is_set():
             try:
                 action = self.controller.anomalyActionQueue.get(timeout=1)
-                print(f"Collected logs for action: {action}")
+                #print(f"Collected logs for action: {action}")
                 self.controller.anomalyActionQueue.task_done()
             except queue.Empty:
                 continue
@@ -387,6 +540,10 @@ class Controller:
             thread.join(timeout=5)
             print(f"Thread {thread.name} with ID {thread.ident} has been shut down")
         print("Shutting down all components")
+        # Clean up shared memory via EventDispatcher
+        if hasattr(self, "event_dispatcher"):
+            self.event_dispatcher.cleanup()
+
 
     def run(self) -> None:
 
@@ -395,7 +552,8 @@ class Controller:
         print(f"Started thread eBPFProcessSupervisor with ID {process_thread.ident}")
         self.threads.append(process_thread)
         
-        self._supervise_thread("EventDispatcher", EventDispatcher(self).run)
+        self.event_dispatcher = EventDispatcher(self)
+        self._supervise_thread("EventDispatcher", self.event_dispatcher.run)
         self._supervise_thread("AnomalyWatcher", AnomalyWatcher(self).run)
         self._supervise_thread("LogCollector", LogCollectorManager(self).run)
         self._supervise_thread("LogCompressor", LogCompressor(self).run)
