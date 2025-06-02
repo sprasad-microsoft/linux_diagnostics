@@ -20,8 +20,8 @@ guardian:
         - EACCES
         - EAGAIN
         - EIO
-      exclude_codes:          # Error codes to exclude, not to be used with trackonly
-        - ENOENT
+      # exclude_codes:          # Error codes to exclude, not to be used with trackonly
+      #   - ENOENT
       actions:
         - dmesg
         - journalctl           # can add another eBPF tool to trigger here too

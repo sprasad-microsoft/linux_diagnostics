@@ -7,6 +7,7 @@ import time
 import traceback
 import yaml
 import warnings
+import signal
 
 from dataclasses import dataclass, field
 from typing import Optional
@@ -257,6 +258,7 @@ class EventDispatcher:
         self.controller = controller
 
     def run(self):
+        print("EventDispatcher started running")
         while not self.controller.stop_event.is_set():
             time.sleep(1)  # Simulate polling
             event = {"event": "dummy_event"}
@@ -265,9 +267,10 @@ class EventDispatcher:
 class AnomalyWatcher:
     def __init__(self, controller):
         self.controller = controller
-        self.interval = self.controller.config["watch_interval_sec"]
+        self.interval = self.controller.config.watch_interval_sec
 
     def run(self):
+        print("AnomalyWatcher started running")
         while not self.controller.stop_event.is_set():
             time.sleep(self.interval)
             try:
@@ -282,6 +285,7 @@ class LogCollectorManager:
         self.controller = controller
 
     def run(self):
+        print("LogCollectorManager started running")
         while not self.controller.stop_event.is_set():
             try:
                 action = self.controller.anomalyActionQueue.get(timeout=1)
@@ -295,6 +299,7 @@ class LogCompressor:
         self.controller = controller
 
     def run(self):
+        print("LogCompressor started running")
         while not self.controller.stop_event.is_set():
             try:
                 batch_id = self.controller.archiveQueue.get(timeout=1)
@@ -308,6 +313,7 @@ class AuditLogger:
         self.controller = controller
 
     def run(self):
+        print("AuditLogger started running")
         while not self.controller.stop_event.is_set():
             try:
                 record = self.controller.auditQueue.get(timeout=1)
@@ -321,35 +327,41 @@ class SpaceWatcher:
         self.controller = controller
 
     def run(self):
+        print("SpaceWatcher started running")
         while not self.controller.stop_event.is_set():
-            time.sleep(self.controller.config["cleanup"]["cleanup_interval_sec"])
+            time.sleep(self.controller.config.cleanup["cleanup_interval_sec"])
             print("Performed space cleanup")
 
 class Controller:
     def __init__(self, config_path: str):
         self.stop_event = threading.Event()
         self.config = ConfigManager(config_path).data
+        print("Parsed config file")
+        import pprint
+        pp = pprint.PrettyPrinter(indent=2)
+        pp.pprint(self.config)
         self.threads = []
         self.eventQueue = queue.Queue()
         self.anomalyActionQueue = queue.Queue()
         self.archiveQueue = queue.Queue()
         self.auditQueue = queue.Queue()
 
-    def _supervise_thread(self, name: str, target: callable) -> None:
+    def _supervise_thread(self, name: str, target: callable, *args, **kwargs) -> None:
         def runner():
             while not self.stop_event.is_set():
                 try:
-                    target()
+                    target(*args, **kwargs)
                 except Exception as e:
                     print(f"{name} died: {traceback.format_exc()}")
                     time.sleep(1)  # Wait before restarting
         t = threading.Thread(target=runner, name=name, daemon=True)
         t.start()
+        print(f"Started thread {name} with ID {t.ident}")
         self.threads.append(t)
 
     def _supervise_process(self) -> None:
         while not self.stop_event.is_set():
-            self._start_ebpf_process()  # Dummy implementation
+            self._start_ebpf_process()
             while True:
                 if self.stop_event.wait(timeout=1):
                     break
@@ -359,11 +371,13 @@ class Controller:
             if self.stop_event.is_set():
                 os.killpg(os.getpgid(self.ebpf_process.pid), signal.SIGINT)
                 self.ebpf_process.wait(timeout=5)
+                print("eBPF process stopped gracefully")
                 break
             time.sleep(1)
 
     def _start_ebpf_process(self):
         self.ebpf_process = subprocess.Popen(["sleep", "100"], preexec_fn=os.setsid)
+        print(f"Started new eBPF process with PID {self.ebpf_process.pid}")
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -371,10 +385,16 @@ class Controller:
     def _shutdown(self) -> None:
         for thread in self.threads:
             thread.join(timeout=5)
+            print(f"Thread {thread.name} with ID {thread.ident} has been shut down")
         print("Shutting down all components")
 
     def run(self) -> None:
-        self._supervise_process()
+
+        process_thread = threading.Thread(target=self._supervise_process, name="ProcessSupervisor", daemon=True)
+        process_thread.start()
+        print(f"Started thread eBPFProcessSupervisor with ID {process_thread.ident}")
+        self.threads.append(process_thread)
+        
         self._supervise_thread("EventDispatcher", EventDispatcher(self).run)
         self._supervise_thread("AnomalyWatcher", AnomalyWatcher(self).run)
         self._supervise_thread("LogCollector", LogCollectorManager(self).run)
@@ -384,19 +404,17 @@ class Controller:
         self.stop_event.wait()
         self._shutdown()
 
-# Main code to test the Config Manager
-if __name__ == "__main__":
-    config_path = os.path.join(os.path.dirname(__file__), "../config/config.yaml")
-    config_manager = ConfigManager(config_path)
-    #print it in a beautiful way
-    import pprint
-    pp = pprint.PrettyPrinter(indent=2)
-    pp.pprint(config_manager.data)
+def handle_signal(signum, frame):
+    print(f"Received signal {signum}, shutting down...")
+    controller.stop()
 
-# if __name__ == "__main__":
-#     # Use the config path relative to this file, as in controller_draft.py
-#     config_path = os.path.join(os.path.dirname(__file__), "../config/config.yaml")
-#     controller = Controller(config_path)
-#     controller.run()
-#     time.sleep(10)  # Let it run for a while
-#     controller.stop()
+if __name__ == "__main__":
+    # Use the config path relative to this file, as in controller_draft.py
+    config_path = os.path.join(os.path.dirname(__file__), "../config/config.yaml")
+    controller = Controller(config_path)
+
+    # should i specify this in the Controller constructor?
+    signal.signal(signal.SIGTERM, handle_signal)
+    signal.signal(signal.SIGINT, handle_signal)
+
+    controller.run()
