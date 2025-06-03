@@ -17,6 +17,8 @@ import numpy as np
 
 from dataclasses import dataclass, field
 from typing import Optional
+from abc import ABC, abstractmethod
+from enum import Enum
 
 @dataclass(slots=True, frozen=True)
 class AnomalyConfig:
@@ -412,34 +414,99 @@ class EventDispatcher:
         except OSError as e:
             print(f"EventDispatcher: Error cleaning up shared memory: {e}")
 
+class AnomalyType(Enum):
+    LATENCY = "latency"
+    ERROR = "error"
+    # Add more types as needed
+
+class AnomalyHandler(ABC):
+    def __init__(self, config: AnomalyConfig):
+        self.config = config
+
+    @abstractmethod
+    def detect(self, arr: np.ndarray) -> bool:
+        """Return True if anomaly detected."""
+        pass
+
+class LatencyAnomalyHandler(AnomalyHandler):
+    def detect(self, arr: np.ndarray) -> bool:
+        # Build a mapping from smbcommand id to threshold, only for valid commands
+        cmd_thresholds = {
+            ALL_SMB_CMDS[cmd]: threshold
+            for cmd, threshold in self.config.track.items()
+            if cmd in ALL_SMB_CMDS and threshold is not None and threshold >= 0
+        }
+        if not cmd_thresholds:
+            print(f"[AnomalyHandler] No valid commands to track for {self.config.tool}")
+            return False
+        
+        # print all events in arr for debugging
+        for event in arr:
+            print(f"Event: {event["smbcommand"]}")
+
+        # count events in arr whose cmd is in cmd_thresholds and latency exceeds threshold using numpy
+        mask = np.array([
+            (event["smbcommand"] in cmd_thresholds)
+            for event in arr
+        ])
+        count = np.sum(mask)
+
+        print(f"[AnomalyHandler] Detected {count} latency anomalies for {self.config.tool}")
+
+        return count >= 9
+
+class ErrorAnomalyHandler(AnomalyHandler):
+    def detect(self, arr: np.ndarray) -> bool:
+        # Placeholder for error detection logic
+        return False  # Replace with actual logic
+
 class AnomalyWatcher:
     def __init__(self, controller):
         self.controller = controller
         self.interval = self.controller.config.watch_interval_sec
+        self.handlers: dict[AnomalyType, AnomalyHandler] = self._load_anomaly_handlers(controller.config)
 
-    def run(self):
-        print("AnomalyWatcher started running")
+    def _load_anomaly_handlers(self, config) -> dict:
+        handlers = {}
+        for name, anomaly_cfg in config.guardian.anomalies.items():
+            if anomaly_cfg.type.lower() == "latency":
+                handlers[AnomalyType.LATENCY] = LatencyAnomalyHandler(anomaly_cfg)
+            elif anomaly_cfg.type.lower() == "error":
+                handlers[AnomalyType.ERROR] = ErrorAnomalyHandler(anomaly_cfg)
+        return handlers
+
+    def _get_batch(self):
+        """Get a batch of events from the eventQueue."""
+        try:
+            batch = self.controller.eventQueue.get(timeout=1)
+            return batch
+        except queue.Empty:
+            return None
+
+    def run(self) -> None:
+        """Loop: poll eventQueue, detect anomalies, and put actions into anomalyActionQueue"""
         while not self.controller.stop_event.is_set():
+            while True:
+                try:
+                    batch = self.controller.eventQueue.get_nowait()
+                    #print each event (reomve this code later)
+                    #for event in batch:
+                        #print(f"Event: {event}")
+                except queue.Empty:
+                    break  # Queue is empty, exit inner loop
+                for handler in self.handlers.values():
+                    # ...filtering and detection logic...
+                    # this will only filter latency anomalies for now
+                    filtered_batch = np.array([event for event in batch if event["tool"] == 7])
+                    if handler.detect(filtered_batch):
+                        action = self._generate_action(filtered_batch)
+                        self.controller.anomalyActionQueue.put(action)
             time.sleep(self.interval)
-            try:
-                batch = self.controller.eventQueue.get(timeout=1)
-                # Iterate and print each event in the batch
-                for event in batch:
-                    print({
-                        "pid": int(event['pid']),
-                        "cmd_end_time_ns": int(event['cmd_end_time_ns']),
-                        "session_id": int(event['session_id']),
-                        "mid": int(event['mid']),
-                        "smbcommand": int(event['smbcommand']),
-                        "metric_latency_ns": int(event['metric_latency_ns']),
-                        "tool": int(event['tool']),
-                        "is_compounded": int(event['is_compounded']),
-                        "task": event['task'].decode(errors='ignore').strip()
-                    })
-                action = {"anomaly": "latency", "timestamp": time.time(), "event": batch}
-                self.controller.anomalyActionQueue.put(action)
-            except queue.Empty:
-                continue
+    
+    def _generate_action(self, event: dict) -> dict:
+        """Generate an action based on the detected anomaly."""
+        # Placeholder: Implement action generation logic
+        return {"anomaly": "detected", "event": event}
 
 class LogCollectorManager:
     def __init__(self, controller):
@@ -450,7 +517,7 @@ class LogCollectorManager:
         while not self.controller.stop_event.is_set():
             try:
                 action = self.controller.anomalyActionQueue.get(timeout=1)
-                #print(f"Collected logs for action: {action}")
+                print(f"Collected logs for action: {action}")
                 self.controller.anomalyActionQueue.task_done()
             except queue.Empty:
                 continue
@@ -553,14 +620,13 @@ class Controller:
         self.stop_event.set()
 
     def _shutdown(self) -> None:
-        # Clean up shared memory via EventDispatcher
-        if hasattr(self, "event_dispatcher"):
-            self.event_dispatcher.cleanup()
         for thread in self.threads:
             thread.join(timeout=5)
             print(f"Thread {thread.name} with ID {thread.ident} has been shut down")
         print("Shutting down all components")
-        
+        # Clean up shared memory via EventDispatcher
+        if hasattr(self, "event_dispatcher"):
+            self.event_dispatcher.cleanup()
 
 
     def run(self) -> None:
