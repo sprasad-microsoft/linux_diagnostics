@@ -341,6 +341,7 @@ class EventDispatcher:
             print(f"Failed to map shared memory: {e}")
             os.close(self.fd)
             raise
+
     def run(self):
         print("EventDispatcher started running")
         while not self.controller.stop_event.is_set():
@@ -397,6 +398,13 @@ class EventDispatcher:
 
     def cleanup(self):
         try:
+            # Read head and tail before closing mmap
+            self.m.seek(0)
+            head = struct.unpack_from("<Q", self.m, 0)[0]
+            tail = struct.unpack_from("<Q", self.m, 8)[0]
+            if head != tail:
+                print("EventDispatcher: Warning - head and tail are not equal, indicating potential data loss.")
+
             self.m.close()
             os.close(self.fd)
             os.unlink(f"/dev/shm{SHM_NAME}")
@@ -527,22 +535,32 @@ class Controller:
                 print("eBPF process stopped gracefully")
                 break
             time.sleep(1)
+   
+    def set_death_signal():
+        # PR_SET_PDEATHSIG = 1
+        libc = ctypes.CDLL("libc.so.6")
+        libc.prctl(1, signal.SIGKILL)
 
     def _start_ebpf_process(self):
-        self.ebpf_process = subprocess.Popen(["sleep", "100"], preexec_fn=os.setsid)
+        wrapper_path = os.path.join(os.path.dirname(__file__), "pdeathsig_wrapper.py")
+        self.ebpf_process = subprocess.Popen(
+            ["python3", wrapper_path, "/bin/sleep", "1000"],
+            preexec_fn=os.setsid
+        )
         print(f"Started new eBPF process with PID {self.ebpf_process.pid}")
 
     def stop(self) -> None:
         self.stop_event.set()
 
     def _shutdown(self) -> None:
+        # Clean up shared memory via EventDispatcher
+        if hasattr(self, "event_dispatcher"):
+            self.event_dispatcher.cleanup()
         for thread in self.threads:
             thread.join(timeout=5)
             print(f"Thread {thread.name} with ID {thread.ident} has been shut down")
         print("Shutting down all components")
-        # Clean up shared memory via EventDispatcher
-        if hasattr(self, "event_dispatcher"):
-            self.event_dispatcher.cleanup()
+        
 
 
     def run(self) -> None:
