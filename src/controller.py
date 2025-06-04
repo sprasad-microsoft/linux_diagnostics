@@ -74,6 +74,7 @@ import errno
 error_codes = list(errno.errorcode.values())
 
 class ConfigManager:
+
     def __init__(self, config_path: str):
         with open(config_path, 'r') as file:
             config_data = yaml.safe_load(file)
@@ -316,6 +317,7 @@ event_dtype = np.dtype([
 ], align=True)
 
 class EventDispatcher:
+
     def __init__(self, controller):
         self.controller = controller
         created = False
@@ -359,7 +361,7 @@ class EventDispatcher:
         self.m.seek(0)
         head = struct.unpack_from("<Q", self.m, 0)[0]
         tail = struct.unpack_from("<Q", self.m, 8)[0]
-        print(f"[AOD] head={head}, tail={tail}")
+        #print(f"[AOD] head={head}, tail={tail}")
         event_size = ctypes.sizeof(Event)
         events = []
 
@@ -441,7 +443,7 @@ class LatencyAnomalyHandler(AnomalyHandler):
         anomaly_mask = (arr["metric_latency_ns"] >= thresholds) & valid_mask
         count = np.sum(anomaly_mask)
 
-        #print(arr) #for debugging
+        #print(f"Events:{arr}") #for debugging
 
         print(f"[AnomalyHandler] Detected {count} latency anomalies for {self.config.tool}")
         return count >= 9
@@ -481,14 +483,14 @@ class AnomalyWatcher:
                 try:
                     batch = self.controller.eventQueue.get_nowait()
                     #print each event (reomve this code later)
-                    #for event in batch:
-                        #print(f"Event: {event}")
+                    for event in batch:
+                        print(f"Event: {event}")
                 except queue.Empty:
                     break  # Queue is empty, exit inner loop
                 for anomaly_type, handler in self.handlers.items():
                     # ...filtering and detection logic...
                     # this will only filter latency anomalies for now
-                    filtered_batch = batch[batch["tool"] == 7]
+                    filtered_batch = batch[batch["tool"] == 0]
                     if handler.detect(filtered_batch):
                         action = self._generate_action(anomaly_type, filtered_batch)
                         self.controller.anomalyActionQueue.put(action)
@@ -555,6 +557,7 @@ class SpaceWatcher:
             print("Performed space cleanup")
 
 class Controller:
+
     def __init__(self, config_path: str):
         self.stop_event = threading.Event()
         self.config = ConfigManager(config_path).data
@@ -596,14 +599,39 @@ class Controller:
                 print("eBPF process stopped gracefully")
                 break
             time.sleep(1)
-            
+      
     def _start_ebpf_process(self):
         wrapper_path = os.path.join(os.path.dirname(__file__), "pdeathsig_wrapper.py")
+        ebpf_binary_path = os.path.join(os.path.dirname(__file__), "smbsloweraod")
+        x, y = self._get_ebpf_args()
+        y="1,2,3"
         self.ebpf_process = subprocess.Popen(
-            ["python3", wrapper_path, "/bin/sleep", "1000"],
+            ["python3", wrapper_path, ebpf_binary_path, "-m", str(x), "-c", y],
             preexec_fn=os.setsid
         )
-        print(f"Started new eBPF process with PID {self.ebpf_process.pid}")
+        print(f"Started new eBPF process with PID {self.ebpf_process.pid} and args: -m {x} -c {y}")
+
+    def _get_ebpf_args(self):
+        # Find the latency anomaly config
+        latency_anomaly = None
+        for anomaly in self.config.guardian.anomalies.values():
+            if anomaly.type.lower() == "latency":
+                latency_anomaly = anomaly
+                break
+
+        if latency_anomaly is None:
+            raise RuntimeError("No latency anomaly config found!")
+
+        # x: minimum of all thresholds (including default)
+        thresholds = [v for v in latency_anomaly.track.values() if v is not None and v >= 0]
+        if latency_anomaly.default_threshold_ms is not None:
+            thresholds.append(latency_anomaly.default_threshold_ms)
+        x = min(thresholds)
+
+        # y: list of all SMB commands we want to track, as numbers, comma-separated
+        smbcmds = [str(ALL_SMB_CMDS[cmd]) for cmd, v in latency_anomaly.track.items() if v is not None and v >= 0]
+        y = ",".join(smbcmds)
+        return x, y
 
     def stop(self) -> None:
         self.stop_event.set()
@@ -616,7 +644,6 @@ class Controller:
         # Clean up shared memory via EventDispatcher
         if hasattr(self, "event_dispatcher"):
             self.event_dispatcher.cleanup()
-
 
     def run(self) -> None:
 
