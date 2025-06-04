@@ -92,6 +92,12 @@ class ConfigManager:
             elif anomaly["type"] == "Error":
                 track = self.get_error_track_cmds(anomaly)
 
+            print(f"track: {track}")
+            # Check if track is empty after all logic
+            if not track or (isinstance(track, dict) and len(track) == 0):
+                raise ValueError(f"No items to track for anomaly '{name}' after applying config logic.")
+
+
             anomalies[name] = AnomalyConfig(
                 type=anomaly["type"],
                 tool=anomaly["tool"],
@@ -142,6 +148,10 @@ class ConfigManager:
         # Handle missing TrackCommands (default to empty list)
         track_commands = track_commands if track_commands is not None else []
         exclude_commands = exclude_commands if exclude_commands is not None else []
+
+        # If both are empty, nothing to validate
+        if not track_commands and not exclude_commands:
+            return
 
         # Use an integer where 2^i indicates if i-th command is present
         present_track_cmds = 0
@@ -199,8 +209,8 @@ class ConfigManager:
             return {code: None for code in all_codes if code not in exclude_set}
 
     def get_latency_track_cmds(self, anomaly):
-        track_commands = anomaly.get("track_commands", [])
-        exclude_commands = anomaly.get("exclude_commands", [])
+        track_commands = anomaly.get("track_commands", []) or []
+        exclude_commands = anomaly.get("exclude_commands", []) or []
         latency_mode = anomaly.get("mode", "all")
 
         # Validate latency mode constraints
@@ -219,6 +229,7 @@ class ConfigManager:
 
         # Apply thresholds based on mode
         if latency_mode == "trackonly":
+            command_map = {}
             for cmd in track_commands:
                 command = cmd["command"]
                 threshold = cmd.get("threshold", default_threshold)
@@ -604,7 +615,6 @@ class Controller:
         wrapper_path = os.path.join(os.path.dirname(__file__), "pdeathsig_wrapper.py")
         ebpf_binary_path = os.path.join(os.path.dirname(__file__), "smbsloweraod")
         x, y = self._get_ebpf_args()
-        y="1,2,3"
         self.ebpf_process = subprocess.Popen(
             ["python3", wrapper_path, ebpf_binary_path, "-m", str(x), "-c", y],
             preexec_fn=os.setsid
