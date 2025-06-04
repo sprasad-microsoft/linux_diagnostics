@@ -672,17 +672,25 @@ class Controller:
         self.stop_event.wait()
         self._shutdown()
 
-def handle_signal(signum, frame):
-    print(f"Received signal {signum}, shutting down...")
-    controller.stop()
+def main():
+    
+    # Check if script is running as root
+    if os.geteuid() != 0:
+        raise RuntimeError("Controller daemon must be run as root.")
 
-if __name__ == "__main__":
     # Use the config path relative to this file, as in controller_draft.py
     config_path = os.path.join(os.path.dirname(__file__), "../config/config.yaml")
     controller = Controller(config_path)
+
+    def handle_signal(signum, frame):
+        print(f"Received signal {signum}, shutting down...")
+        controller.stop()
 
     # should i specify this in the Controller constructor?
     signal.signal(signal.SIGTERM, handle_signal)
     signal.signal(signal.SIGINT, handle_signal)
 
     controller.run()
+
+if __name__ == "__main__":
+    main()
