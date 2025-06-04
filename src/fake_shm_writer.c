@@ -134,13 +134,13 @@ int main() {
             dummy.metric.latency_ns = (rand() % 2 == 0) ? 7 : 9; // smb read
             dummy.smbcommand = 8;
         } else if (random_choice == 2) {
-            dummy.metric.latency_ns = -10; // smb write
+            dummy.metric.latency_ns = 10; // smb write
             dummy.smbcommand = 9;
         } else {
             dummy.metric.latency_ns = (rand() % 2 == 0) ? 9 : 11; // smb lock
             dummy.smbcommand = 10;
         }
-        dummy.metric.latency_ns *= 1e6; // Convert to nanoseconds
+        dummy.metric.latency_ns *= 1000000ULL; // Convert to nanoseconds
         printf("Writing event with pid=%d, smb=%d, latency_ns=%llu\n",
                dummy.pid, dummy.smbcommand, (unsigned long long)dummy.metric.latency_ns);
 

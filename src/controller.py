@@ -302,13 +302,14 @@ class Event(ctypes.Structure):
         ("task", ctypes.c_char * TASK_COMM_LEN)
     ]
 
+#we need to ensure that event_dtype and event cstruct is of the same size
 event_dtype = np.dtype([
     ('pid', np.int32),
     ('cmd_end_time_ns', np.uint64),
     ('session_id', np.uint64),
     ('mid', np.uint64),
-    ('smbcommand', np.uint16),
-    ('metric_latency_ns', np.uint64),
+    ('smbcommand', np.int16),
+    ('metric_latency_ns', np.int64),
     ('tool', np.uint8),
     ('is_compounded', np.uint8),
     ('task', f'S{TASK_COMM_LEN}')
