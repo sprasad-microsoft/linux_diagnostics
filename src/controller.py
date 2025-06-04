@@ -430,29 +430,19 @@ class AnomalyHandler(ABC):
 
 class LatencyAnomalyHandler(AnomalyHandler):
     def detect(self, arr: np.ndarray) -> bool:
-        # Build a mapping from smbcommand id to threshold, only for valid commands
-        cmd_thresholds = {
-            ALL_SMB_CMDS[cmd]: threshold
-            for cmd, threshold in self.config.track.items()
-            if cmd in ALL_SMB_CMDS and threshold is not None and threshold >= 0
-        }
-        if not cmd_thresholds:
-            print(f"[AnomalyHandler] No valid commands to track for {self.config.tool}")
-            return False
-        
-        # print all events in arr for debugging
-        for event in arr:
-            print(f"Event: {event["smbcommand"]}")
+        threshold_lookup = np.full(max(ALL_SMB_CMDS.values()) + 1, -1, dtype=np.int64)
+        for cmd, threshold in self.config.track.items():
+            if cmd in ALL_SMB_CMDS and threshold is not None and threshold >= 0:
+                threshold_lookup[ALL_SMB_CMDS[cmd]] = threshold * 1_000_000
 
-        # count events in arr whose cmd is in cmd_thresholds and latency exceeds threshold using numpy
-        mask = np.array([
-            (event["smbcommand"] in cmd_thresholds)
-            for event in arr
-        ])
-        count = np.sum(mask)
+        thresholds = threshold_lookup[arr["smbcommand"]]
+        valid_mask = thresholds >= 0
+        anomaly_mask = (arr["metric_latency_ns"] >= thresholds) & valid_mask
+        count = np.sum(anomaly_mask)
+
+        print(arr) #for debugging
 
         print(f"[AnomalyHandler] Detected {count} latency anomalies for {self.config.tool}")
-
         return count >= 9
 
 class ErrorAnomalyHandler(AnomalyHandler):
@@ -494,19 +484,22 @@ class AnomalyWatcher:
                         #print(f"Event: {event}")
                 except queue.Empty:
                     break  # Queue is empty, exit inner loop
-                for handler in self.handlers.values():
+                for anomaly_type, handler in self.handlers.items():
                     # ...filtering and detection logic...
                     # this will only filter latency anomalies for now
-                    filtered_batch = np.array([event for event in batch if event["tool"] == 7])
+                    filtered_batch = batch[batch["tool"] == 7]
                     if handler.detect(filtered_batch):
-                        action = self._generate_action(filtered_batch)
+                        action = self._generate_action(anomaly_type, filtered_batch)
                         self.controller.anomalyActionQueue.put(action)
             time.sleep(self.interval)
     
-    def _generate_action(self, event: dict) -> dict:
+    def _generate_action(self, anomaly_type: AnomalyType, batch: np.ndarray) -> dict:
         """Generate an action based on the detected anomaly."""
-        # Placeholder: Implement action generation logic
-        return {"anomaly": "detected", "event": event}
+        timestamp = int(time.time() * 1e9)  # nanoseconds since epoch
+        return {
+            "anomaly": anomaly_type,
+            "timestamp": timestamp,
+        }
 
 class LogCollectorManager:
     def __init__(self, controller):

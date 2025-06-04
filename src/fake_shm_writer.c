@@ -134,14 +134,14 @@ int main() {
             dummy.metric.latency_ns = (rand() % 2 == 0) ? 7 : 9; // smb read
             dummy.smbcommand = 8;
         } else if (random_choice == 2) {
-            dummy.metric.latency_ns = 100; // smb write
+            dummy.metric.latency_ns = -10; // smb write
             dummy.smbcommand = 9;
         } else {
             dummy.metric.latency_ns = (rand() % 2 == 0) ? 9 : 11; // smb lock
             dummy.smbcommand = 10;
         }
         dummy.metric.latency_ns *= 1e6; // Convert to nanoseconds
-        printf("Writing event with pid=%d, smb=%lu, latency_ns=%llu\n",
+        printf("Writing event with pid=%d, smb=%d, latency_ns=%llu\n",
                dummy.pid, dummy.smbcommand, (unsigned long long)dummy.metric.latency_ns);
 
         increment_cmd_latency(dummy.smbcommand, dummy.metric.latency_ns);
@@ -169,7 +169,7 @@ int main() {
                    (unsigned long long)cmd_latency_map[i].key.latency,
                    cmd_latency_map[i].count);
         }
-    }
+    }   
     // print no.of commands with cmd=10 latency=9
     int count_10_11 = 0;
     int count_8_9 = 0;
