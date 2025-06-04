@@ -441,7 +441,7 @@ class LatencyAnomalyHandler(AnomalyHandler):
         anomaly_mask = (arr["metric_latency_ns"] >= thresholds) & valid_mask
         count = np.sum(anomaly_mask)
 
-        print(arr) #for debugging
+        #print(arr) #for debugging
 
         print(f"[AnomalyHandler] Detected {count} latency anomalies for {self.config.tool}")
         return count >= 9
@@ -596,12 +596,7 @@ class Controller:
                 print("eBPF process stopped gracefully")
                 break
             time.sleep(1)
-   
-    def set_death_signal():
-        # PR_SET_PDEATHSIG = 1
-        libc = ctypes.CDLL("libc.so.6")
-        libc.prctl(1, signal.SIGKILL)
-
+            
     def _start_ebpf_process(self):
         wrapper_path = os.path.join(os.path.dirname(__file__), "pdeathsig_wrapper.py")
         self.ebpf_process = subprocess.Popen(
