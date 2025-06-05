@@ -387,10 +387,10 @@ class EventDispatcher:
 
     def _poll_shm_buffer(self) -> bytes:
         """Fetch a batch of raw events from shared memory."""
+        fmt = "<Q" if HEAD_TAIL_BYTES == 8 else "<I"
         self.m.seek(0)
-        head = struct.unpack_from("<Q", self.m, 0)[0]
-        tail = struct.unpack_from("<Q", self.m, 8)[0]
-        #print(f"[AOD] head={head}, tail={tail}")
+        head = struct.unpack_from(fmt, self.m, 0)[0]
+        tail = struct.unpack_from(fmt, self.m, HEAD_TAIL_BYTES)[0]
         event_size = ctypes.sizeof(Event)
         events = []
 
