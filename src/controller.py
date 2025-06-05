@@ -462,21 +462,21 @@ class AnomalyHandler(ABC):
         """Return True if anomaly detected."""
         pass
 
+#works only if ebpf code does filtering as per config file (i.e. ignore excluded cmds)
 class LatencyAnomalyHandler(AnomalyHandler):
 
     def __init__(self, config):
         super().__init__(config)
-        self.threshold_lookup = np.full(max(ALL_SMB_CMDS.values()) + 1, -1, dtype=np.uint64)
+        #bcos im iterating over an array of size 20, using for loop wont affect the performance
+        self.threshold_lookup = np.full(len(ALL_SMB_CMDS) + 1,0,dtype=np.uint64)
         for cmd, threshold in self.config.track.items():
-            if cmd in ALL_SMB_CMDS and threshold is not None and threshold >= 0:
-                self.threshold_lookup[ALL_SMB_CMDS[cmd]] = threshold * 1_000_000
-
+            self.threshold_lookup[ALL_SMB_CMDS[cmd]] = threshold*1000000
+            
+    #works only if ebpf code does filtering as per config file (i.e. ignore excluded cmds)
     def detect(self, arr: np.ndarray) -> bool:
-        thresholds = self.threshold_lookup[arr["smbcommand"]]
-        valid_mask = thresholds >= 0
-        anomaly_mask = (arr["metric_latency_ns"] >= thresholds) & valid_mask
-        count = np.sum(anomaly_mask)
-
+        
+        count = np.sum( (arr["metric_latency_ns"] >= self.threshold_lookup[arr["smbcommand"]]) )
+        percentage = count / arr.size
         #print(f"Events:{arr}") #for debugging
 
         print(f"[AnomalyHandler] Detected {count} latency anomalies for {self.config.tool}")
