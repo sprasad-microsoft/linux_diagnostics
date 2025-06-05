@@ -76,8 +76,13 @@ error_codes = list(errno.errorcode.values())
 class ConfigManager:
 
     def __init__(self, config_path: str):
-        with open(config_path, 'r') as file:
-            config_data = yaml.safe_load(file)
+        try:
+            with open(config_path, 'r') as file:
+                config_data = yaml.safe_load(file)
+        except FileNotFoundError:
+            raise RuntimeError(f"Config file not found: {config_path}")
+        except yaml.YAMLError as e:
+            raise RuntimeError(f"YAML parsing error in config file: {e}")
 
         # Parse watcher
         watcher = WatcherConfig(actions=config_data["watcher"]["actions"])
@@ -294,7 +299,7 @@ MAX_ENTRIES = 2048  # Example value, replace with actual
 PAGE_SIZE = 4096  # Example value, replace with actual
 
 SHM_SIZE = ((MAX_ENTRIES + 1) * PAGE_SIZE)
-SHM_DATA_SIZE = (SHM_SIZE//1000 - 2 * HEAD_TAIL_BYTES)  # delete /10 later
+SHM_DATA_SIZE = (SHM_SIZE//10 - 2 * HEAD_TAIL_BYTES)  # delete /10 later
 class Metrics(ctypes.Union):
     _fields_ = [
         ("latency_ns", ctypes.c_ulonglong),
@@ -326,6 +331,12 @@ event_dtype = np.dtype([
     ('is_compounded', np.uint8),
     ('task', f'S{TASK_COMM_LEN}')
 ], align=True)
+
+#ensure that the size of Event and event_dtype is same
+assert ctypes.sizeof(Event) == event_dtype.itemsize, (
+    f"Size mismatch: ctypes Event is {ctypes.sizeof(Event)} bytes, "
+    f"numpy event_dtype is {event_dtype.itemsize} bytes"
+)
 
 class EventDispatcher:
 
@@ -366,6 +377,13 @@ class EventDispatcher:
             if batch is not None and len(batch) > 0:
                 self.controller.eventQueue.put(batch)
             time.sleep(1)  # Adjust as needed
+
+        # After stop_event is set, do a final drain
+        raw_events = self._poll_shm_buffer()
+        batch = self._parse(raw_events)
+        if batch is not None and len(batch) > 0:
+            self.controller.eventQueue.put(batch)
+        print("EventDispatcher: Final drain complete, exiting.")
 
     def _poll_shm_buffer(self) -> bytes:
         """Fetch a batch of raw events from shared memory."""
@@ -619,6 +637,8 @@ class Controller:
             ["python3", wrapper_path, ebpf_binary_path, "-m", str(x), "-c", y],
             preexec_fn=os.setsid
         )
+        #for now im launching smbslower by default
+        #later as per the config file, we shld launch the necessary tools
         print(f"Started new eBPF process with PID {self.ebpf_process.pid} and args: -m {x} -c {y}")
 
     def _get_ebpf_args(self):
@@ -693,4 +713,9 @@ def main():
     controller.run()
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        import traceback
+        print("Fatal error in main():")
+        traceback.print_exc()
