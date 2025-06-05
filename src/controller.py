@@ -327,7 +327,7 @@ event_dtype = np.dtype([
     ('session_id', np.uint64),
     ('mid', np.uint64),
     ('smbcommand', np.int16),
-    ('metric_latency_ns', np.int64),
+    ('metric_latency_ns', np.uint64),
     ('tool', np.uint8),
     ('is_compounded', np.uint8),
     ('task', f'S{TASK_COMM_LEN}')
@@ -463,13 +463,16 @@ class AnomalyHandler(ABC):
         pass
 
 class LatencyAnomalyHandler(AnomalyHandler):
-    def detect(self, arr: np.ndarray) -> bool:
-        threshold_lookup = np.full(max(ALL_SMB_CMDS.values()) + 1, -1, dtype=np.int64)
+
+    def __init__(self, config):
+        super().__init__(config)
+        self.threshold_lookup = np.full(max(ALL_SMB_CMDS.values()) + 1, -1, dtype=np.uint64)
         for cmd, threshold in self.config.track.items():
             if cmd in ALL_SMB_CMDS and threshold is not None and threshold >= 0:
-                threshold_lookup[ALL_SMB_CMDS[cmd]] = threshold * 1_000_000
+                self.threshold_lookup[ALL_SMB_CMDS[cmd]] = threshold * 1_000_000
 
-        thresholds = threshold_lookup[arr["smbcommand"]]
+    def detect(self, arr: np.ndarray) -> bool:
+        thresholds = self.threshold_lookup[arr["smbcommand"]]
         valid_mask = thresholds >= 0
         anomaly_mask = (arr["metric_latency_ns"] >= thresholds) & valid_mask
         count = np.sum(anomaly_mask)
@@ -522,6 +525,8 @@ class AnomalyWatcher:
                 for anomaly_type, handler in self.handlers.items():
                     # this will only filter latency anomalies for now (tool=0)
                     filtered_batch = batch[batch["tool"] == 0]
+                    # filtered_batch = batch[np.where(batch["tool"] == 0)]
+                    # can do this also, but the method without np.where is faster
                     if handler.detect(filtered_batch):
                         action = self._generate_action(anomaly_type, filtered_batch)
                         self.controller.anomalyActionQueue.put(action)
