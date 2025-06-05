@@ -281,7 +281,8 @@ class ConfigManager:
 SHM_NAME = "/bpf_shm"
 TASK_COMM_LEN = 16
 
-HEAD_TAIL_BYTES = 8 if platform.architecture()[0] == '64bit' else 4
+#Assuming we are working with x64 architecture for now
+HEAD_TAIL_BYTES = 8
 
 # def get_define_value(header_path, macro):
 #     with open(header_path) as f:
