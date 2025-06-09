@@ -18,17 +18,17 @@ class QuickAction(ABC):
 class JournalctlQuickAction(QuickAction):
     def execute(self, batch_id: str):
         # Example: collect journalctl logs for the batch
-        output_path = f"batches/{batch_id}/journalctl.log"
+        output_path = f"batches/{batch_id}/quick/journalctl.log"
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w") as f:
-            subprocess.run(["journalctl", "-n", "100"], stdout=f)
+            subprocess.run(["pdeathsig_wrapper", "SIGTERM", "journalctl", "-n", "100"], stdout=f)
 
 class CifsstatsQuickAction(QuickAction):
     def execute(self, batch_id: str) -> None:
-        output_path = f"batches/{batch_id}/cifsstats.log"
+        output_path = f"batches/{batch_id}/quick/cifsstats.log"
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         with open(output_path, "w") as f:
-            subprocess.run(["cat", "/proc/fs/cifs/Stats"], stdout=f)
+            subprocess.run(["pdeathsig_wrapper", "SIGTERM", "cat", "/proc/fs/cifs/Stats"], stdout=f)
 
 class ToolManager(ABC):
     def __init__(self, output_subdir: str = "live/tool", base_duration: int = 20, max_duration: int = 90):
@@ -106,14 +106,14 @@ class ToolManager(ABC):
 class TcpdumpManager(ToolManager):
     def _build_command(self, batch_id: str) -> list:
         output_path = os.path.join("batches", batch_id, self.output_subdir, "tcpdump.pcap")
-        return ["tcpdump", "-i", "any", "-w", output_path]
+        return ["pdeathsig_wrapper", "SIGTERM", "tcpdump", "-i", "any", "-w", output_path]
 
 class TraceCmdManager(ToolManager):
     def _build_command(self, batch_id: str) -> list:
         output_path = os.path.join("batches", batch_id, self.output_subdir, "trace.dat")
-        return ["trace-cmd", "record", "-o", output_path]
+        return ["pdeathsig_wrapper", "SIGTERM", "trace-cmd", "record", "-o", output_path]
 
-class LogCollectionManager:
+class LogCollectorManager:
     def __init__(self, controller):
         self.controller = controller
         self.quick_actions_pool = ThreadPoolExecutor(max_workers=4)
