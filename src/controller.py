@@ -6,6 +6,7 @@ import signal
 import time
 import traceback
 import signal
+import argparse
 
 from shared_data import *
 from ConfigManager import ConfigManager
@@ -128,6 +129,8 @@ def main():
     # Check if script is running as root
     if os.geteuid() != 0:
         raise RuntimeError("Controller daemon must be run as root.")
+
+    # add arguments later
 
     # Use the config path relative to this file, as in controller_draft.py
     config_path = os.path.join(os.path.dirname(__file__), "../config/config.yaml")

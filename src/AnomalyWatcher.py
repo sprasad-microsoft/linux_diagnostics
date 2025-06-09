@@ -2,6 +2,7 @@ from enum import Enum
 from abc import ABC, abstractmethod
 import queue
 import time
+import numpy as np
 
 from shared_data import *
 
@@ -24,6 +25,7 @@ class LatencyAnomalyHandler(AnomalyHandler):
 
     def __init__(self, config):
         super().__init__(config)
+        self.acceptable_percentage = self.config.acceptable_percentage
         #bcos im iterating over an array of size 20, using for loop wont affect the performance
         self.threshold_lookup = np.full(len(ALL_SMB_CMDS) + 1,0,dtype=np.uint64)
         for cmd, threshold in self.config.track.items():
@@ -37,7 +39,8 @@ class LatencyAnomalyHandler(AnomalyHandler):
         #print(f"Events:{arr}") #for debugging
 
         print(f"[AnomalyHandler] Detected {count} latency anomalies for {self.config.tool}")
-        return count >= 9
+        print(f"{self.acceptable_percentage}")
+        return percentage >= self.acceptable_percentage
 
 class ErrorAnomalyHandler(AnomalyHandler):
     def detect(self, arr: np.ndarray) -> bool:
