@@ -51,7 +51,7 @@ class ErrorAnomalyHandler(AnomalyHandler):
 class AnomalyWatcher:
     def __init__(self, controller):
         self.controller = controller
-        self.interval = self.controller.config.watch_interval_sec
+        self.interval = getattr(self.controller.config, "watch_interval_sec", 5)  # 5 seconds default
         self.handlers: dict[AnomalyType, AnomalyHandler] = self._load_anomaly_handlers(controller.config)
 
     def _load_anomaly_handlers(self, config) -> dict:

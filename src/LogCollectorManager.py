@@ -7,12 +7,12 @@ import psutil
 from concurrent.futures import ThreadPoolExecutor
 from abc import ABC, abstractmethod
 
-BATCHES_ROOT = "/var/log/aod/batches"
 PDEATHSIG_WRAPPER = os.path.join(os.path.dirname(__file__), "pdeathsig_wrapper.py")
 
 class QuickAction(ABC):
-    def __init__(self, params: dict):
+    def __init__(self, params: dict, batches_root: str):
         self.params = params
+        self.batches_root = batches_root
 
     @abstractmethod
     def execute(self, batch_id: str) -> None:
@@ -20,7 +20,7 @@ class QuickAction(ABC):
 
 class JournalctlQuickAction(QuickAction):
     def execute(self, batch_id: str):
-        output_path = os.path.join(BATCHES_ROOT, batch_id, "quick", "journalctl.log")
+        output_path = os.path.join(self.batches_root, batch_id, "quick", "journalctl.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         print(f"[Log Collector][journalctl] Collecting journalctl logs for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
@@ -32,7 +32,7 @@ class JournalctlQuickAction(QuickAction):
 
 class CifsstatsQuickAction(QuickAction):
     def execute(self, batch_id: str) -> None:
-        output_path = os.path.join(BATCHES_ROOT, batch_id, "quick", "cifsstats.log")
+        output_path = os.path.join(self.batches_root, batch_id, "quick", "cifsstats.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         print(f"[Log Collector][cifsstats] Collecting cifsstats logs for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
@@ -43,8 +43,9 @@ class CifsstatsQuickAction(QuickAction):
         print(f"[Log Collector][cifsstats] Finished writing cifsstats logs for batch {batch_id} at {output_path}")
 
 class ToolManager(ABC):
-    def __init__(self, controller, output_subdir: str = "live/tool", base_duration: int = 20, max_duration: int = 90):
-        self.controller = controller 
+    def __init__(self, controller, batches_root, output_subdir: str = "live/tool", base_duration: int = 20, max_duration: int = 90):
+        self.controller = controller
+        self.batches_root = batches_root
         self.base_duration = base_duration
         self.max_duration = max_duration
         self.output_subdir = output_subdir
@@ -80,7 +81,7 @@ class ToolManager(ABC):
         ...
 
     def _start(self, batch_id: str) -> None:
-        output_path = os.path.join(BATCHES_ROOT, batch_id, self.output_subdir)
+        output_path = os.path.join(self.batches_root, batch_id, self.output_subdir)
         os.makedirs(output_path, exist_ok=True)
         in_progress = os.path.join(output_path, ".IN_PROGRESS")
         with open(in_progress, "w") as f:
@@ -103,7 +104,7 @@ class ToolManager(ABC):
             print(f"[Log Collector][{self.tool_name()}] Terminating process for batch {batch_id}")
             self.proc[batch_id].terminate()
             self.proc[batch_id].wait()
-        output_path = os.path.join(BATCHES_ROOT, batch_id, self.output_subdir)
+        output_path = os.path.join(self.batches_root, batch_id, self.output_subdir)
         in_progress = os.path.join(output_path, ".IN_PROGRESS")
         complete = os.path.join(output_path, ".COMPLETE")
         if os.path.exists(in_progress):
@@ -149,19 +150,19 @@ class ToolManager(ABC):
         return False
 
 class TcpdumpManager(ToolManager):
-    def __init__(self, controller, output_subdir: str = "live/tcpdump", base_duration: int = 20, max_duration: int = 90):
-        super().__init__(controller, output_subdir, base_duration, max_duration)
+    def __init__(self, controller, batches_root: str, output_subdir: str = "live/tcpdump", base_duration: int = 20, max_duration: int = 90):
+        super().__init__(controller, batches_root, output_subdir, base_duration, max_duration)
 
     def _build_command(self, batch_id: str) -> list:
-        output_path = os.path.join(BATCHES_ROOT, batch_id, "live", "tcpdump", "tcpdump.1.pcap")
+        output_path = os.path.join(self.batches_root, batch_id, self.output_subdir, "tcpdump.1.pcap")
         return ["python3", PDEATHSIG_WRAPPER, "tcpdump", "-i", "any", "-w", output_path]
 
 class TraceCmdManager(ToolManager):
-    def __init__(self, controller, output_subdir: str = "live/trace", base_duration: int = 20, max_duration: int = 90):
-        super().__init__(controller, output_subdir, base_duration, max_duration)
+    def __init__(self, controller, batches_root: str, output_subdir: str = "live/trace", base_duration: int = 20, max_duration: int = 90):
+        super().__init__(controller, batches_root, output_subdir, base_duration, max_duration)
 
     def _build_command(self, batch_id: str) -> list:
-        output_path = os.path.join(BATCHES_ROOT, batch_id, "live", "trace", "trace.dat")
+        output_path = os.path.join(self.batches_root, batch_id, self.output_subdir, "trace.dat")
         return [
             "python3", PDEATHSIG_WRAPPER, "trace-cmd", "record",
             "-e", "sched_switch",
@@ -181,21 +182,24 @@ class TraceCmdManager(ToolManager):
 class LogCollectorManager:
     def __init__(self, controller):
         self.controller = controller
+        self.aod_output_dir = getattr(self.controller.config, "aod_output_dir", "/var/log/aod")
+        self.batches_root = os.path.join(self.aod_output_dir, "batches")
+        self.batches_root = os.path.join(self.aod_output_dir, "batches")
         self.quick_actions_pool = ThreadPoolExecutor(max_workers=4)
-        self.tcpdump_manager = TcpdumpManager(controller,"live/tcpdump", 20, 90)
-        self.trace_manager = TraceCmdManager(controller,"live/trace", 20, 90)
+        self.tcpdump_manager = TcpdumpManager(controller, self.batches_root, "live/tcpdump", 20, 90)
+        self.trace_manager = TraceCmdManager(controller, self.batches_root, "live/trace", 20, 90)
         self.anomaly_actions = self.set_anomaly_actions()
 
     def set_anomaly_actions(self):
         # change code to parse config file to fill these details later
         return {
-            "latency": [JournalctlQuickAction({}), CifsstatsQuickAction({}), self.tcpdump_manager, self.trace_manager],
-            "error": [CifsstatsQuickAction({}), self.trace_manager]
+            "latency": [JournalctlQuickAction({}, self.batches_root), CifsstatsQuickAction({}, self.batches_root), self.tcpdump_manager, self.trace_manager],
+            "error": [CifsstatsQuickAction({}, self.batches_root), self.trace_manager]
         }
 
     def _ensure_batch_dir(self, evt) -> str:
         batch_id = str(evt.get("batch_id", evt.get("timestamp", int(time.time()))))
-        batch_dir = os.path.join(BATCHES_ROOT, batch_id)
+        batch_dir = os.path.join(self.batches_root, batch_id)
         os.makedirs(batch_dir, exist_ok=True)
         print(f"[Log Collector][manager] Ensured batch directory exists: {batch_dir}")
         return batch_id
