@@ -40,6 +40,7 @@ class LatencyAnomalyHandler(AnomalyHandler):
 
         print(f"[AnomalyHandler] Detected {count} latency anomalies for {self.config.tool}")
         print(f"{self.acceptable_percentage}")
+        return count >= 1
         return percentage >= self.acceptable_percentage
 
 class ErrorAnomalyHandler(AnomalyHandler):
