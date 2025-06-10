@@ -28,6 +28,7 @@ class JournalctlQuickAction(QuickAction):
                 ["python3", PDEATHSIG_WRAPPER, "journalctl", "-n", "100"],
                 stdout=f
             )
+        print(f"[Log Collector][journalctl] Finished writing journalctl logs for batch {batch_id} at {output_path}")
 
 class CifsstatsQuickAction(QuickAction):
     def execute(self, batch_id: str) -> None:
@@ -39,6 +40,7 @@ class CifsstatsQuickAction(QuickAction):
                 ["python3", PDEATHSIG_WRAPPER, "cat", "/proc/fs/cifs/Stats"],
                 stdout=f
             )
+        print(f"[Log Collector][cifsstats] Finished writing cifsstats logs for batch {batch_id} at {output_path}")
 
 class ToolManager(ABC):
     def __init__(self, controller, output_subdir: str = "live/tool", base_duration: int = 20, max_duration: int = 90):
@@ -109,7 +111,8 @@ class ToolManager(ABC):
             print(f"[Log Collector][{self.tool_name()}] Renamed {in_progress} to {complete}")
         self.controller.archiveQueue.put((batch_id, self.output_subdir, None))
         print(f"[Log Collector][{self.tool_name()}] Added batch {batch_id} to archive queue")
-
+        print(f"[Log Collector][{self.tool_name()}] Finished writing logs for batch {batch_id} in {output_path}")
+        
     def stop_all(self) -> None:
         print(f"[Log Collector][{self.tool_name()}] Stopping all batches")
         with self.lock:
@@ -158,8 +161,22 @@ class TraceCmdManager(ToolManager):
         super().__init__(controller, output_subdir, base_duration, max_duration)
 
     def _build_command(self, batch_id: str) -> list:
-        output_path = os.path.join(BATCHES_ROOT, batch_id, "live", "trace-cmd", "trace.dat")
-        return ["python3", PDEATHSIG_WRAPPER, "trace-cmd", "record", "-o", output_path]
+        output_path = os.path.join(BATCHES_ROOT, batch_id, "live", "trace", "trace.dat")
+        return [
+            "python3", PDEATHSIG_WRAPPER, "trace-cmd", "record",
+            "-e", "sched_switch",
+            "-e", "sched_wakeup",
+            "-e", "sched_wakeup_new",
+            "-e", "sched_process_exit",
+            "-e", "block_rq_issue",
+            "-e", "block_rq_complete",
+            "-e", "block_rq_insert",
+            "-e", "net_dev_queue",
+            "-e", "netif_receive_skb",
+            "-e", "net_dev_xmit",
+            "-e", "net_dev_start_xmit",
+            "-o", output_path
+        ]
 
 class LogCollectorManager:
     def __init__(self, controller):
