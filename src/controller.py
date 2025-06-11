@@ -106,6 +106,8 @@ class Controller:
         # Clean up shared memory via EventDispatcher
         if hasattr(self, "event_dispatcher"):
             self.event_dispatcher.cleanup()
+        if hasattr(self, "log_collector_manager"):
+            self.log_collector_manager.stop()
 
     def run(self) -> None:
 
@@ -115,9 +117,10 @@ class Controller:
         self.threads.append(process_thread)
         
         self.event_dispatcher = EventDispatcher(self)
+        self.log_collector_manager = LogCollectorManager(self)
         self._supervise_thread("EventDispatcher", self.event_dispatcher.run)
         self._supervise_thread("AnomalyWatcher", AnomalyWatcher(self).run)
-        self._supervise_thread("LogCollector", LogCollectorManager(self).run)
+        self._supervise_thread("LogCollector", self.log_collector_manager.run)
         self._supervise_thread("LogCompressor", LogCompressor(self).run)
         self._supervise_thread("AuditLogger", AuditLogger(self).run)
         self._supervise_thread("SpaceWatcher", SpaceWatcher(self).run)
