@@ -42,6 +42,66 @@ class CifsstatsQuickAction(QuickAction):
             )
         print(f"[Log Collector][cifsstats] Finished writing cifsstats logs for batch {batch_id} at {output_path}")
 
+class DmesgQuickAction(QuickAction):
+    def execute(self, batch_id: str):
+        output_path = os.path.join(self.batches_root, batch_id, "quick", "dmesg.log")
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        print(f"[Log Collector][dmesg] Collecting dmesg logs for batch {batch_id} at {output_path}")
+        with open(output_path, "w") as f:
+            subprocess.run(
+                ["python3", PDEATHSIG_WRAPPER, "dmesg"],
+                stdout=f
+            )
+        print(f"[Log Collector][dmesg] Finished writing dmesg logs for batch {batch_id} at {output_path}")
+
+class DebugDataQuickAction(QuickAction):
+    def execute(self, batch_id: str):
+        output_path = os.path.join(self.batches_root, batch_id, "quick", "debugdata.log")
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        print(f"[Log Collector][debugdata] Collecting debug data for batch {batch_id} at {output_path}")
+        with open(output_path, "w") as f:
+            subprocess.run(
+                ["python3", PDEATHSIG_WRAPPER, "cat", "/proc/debugdata"],  # Replace with actual debug data command
+                stdout=f
+            )
+        print(f"[Log Collector][debugdata] Finished writing debug data for batch {batch_id} at {output_path}")
+
+class StatsQuickAction(QuickAction):
+    def execute(self, batch_id: str):
+        output_path = os.path.join(self.batches_root, batch_id, "quick", "stats.log")
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        print(f"[Log Collector][stats] Collecting stats for batch {batch_id} at {output_path}")
+        with open(output_path, "w") as f:
+            subprocess.run(
+                ["python3", PDEATHSIG_WRAPPER, "cat", "/proc/stat"],  # Replace with actual stats command if needed
+                stdout=f
+            )
+        print(f"[Log Collector][stats] Finished writing stats for batch {batch_id} at {output_path}")
+
+class ProcfsQuickAction(QuickAction):
+    def execute(self, batch_id: str):
+        output_path = os.path.join(self.batches_root, batch_id, "quick", "procfs.log")
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        print(f"[Log Collector][procfs] Collecting /proc/mounts for batch {batch_id} at {output_path}")
+        with open(output_path, "w") as f:
+            subprocess.run(
+                ["python3", PDEATHSIG_WRAPPER, "cat", "/proc/mounts"],
+                stdout=f
+            )
+        print(f"[Log Collector][procfs] Finished writing procfs logs for batch {batch_id} at {output_path}")
+
+class SmbinfoQuickAction(QuickAction):
+    def execute(self, batch_id: str):
+        output_path = os.path.join(self.batches_root, batch_id, "quick", "smbinfo.log")
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        print(f"[Log Collector][smbinfo] Collecting smbinfo for batch {batch_id} at {output_path}")
+        with open(output_path, "w") as f:
+            subprocess.run(
+                ["python3", PDEATHSIG_WRAPPER, "smbinfo", "filebasicinfo"],
+                stdout=f
+            )
+        print(f"[Log Collector][smbinfo] Finished writing smbinfo logs for batch {batch_id} at {output_path}")
+
 class ToolManager(ABC):
     def __init__(self, controller, batches_root, output_subdir: str = "live/tool", base_duration: int = 20, max_duration: int = 90):
         self.controller = controller
@@ -188,12 +248,24 @@ class LogCollectorManager:
         self.quick_actions_pool = ThreadPoolExecutor(max_workers=4)
         self.tcpdump_manager = TcpdumpManager(controller, self.batches_root, "live/tcpdump", 20, 90)
         self.trace_manager = TraceCmdManager(controller, self.batches_root, "live/trace", 20, 90)
+        self.action_factory = {
+            "journalctl": lambda: JournalctlQuickAction({}, self.batches_root),
+            "cifsstats": lambda: CifsstatsQuickAction({}, self.batches_root),
+            "tcpdump": lambda: self.tcpdump_manager,
+            "trace-cmd": lambda: self.trace_manager,
+            "dmesg": lambda: DmesgQuickAction({}, self.batches_root),
+            "debugdata": lambda: DebugDataQuickAction({}, self.batches_root),
+            "stats": lambda: StatsQuickAction({}, self.batches_root),
+            "procfs": lambda: ProcfsQuickAction({}, self.batches_root),
+            "smbinfo": lambda: SmbinfoQuickAction({}, self.batches_root),
+        }
         self.anomaly_actions = self.set_anomaly_actions()
 
     def set_anomaly_actions(self):
         # change code to parse config file to fill these details later
+        all_actions = [factory() for factory in self.action_factory.values()]
         return {
-            "latency": [JournalctlQuickAction({}, self.batches_root), CifsstatsQuickAction({}, self.batches_root), self.tcpdump_manager, self.trace_manager],
+            "latency": all_actions,
             "error": [CifsstatsQuickAction({}, self.batches_root), self.trace_manager]
         }
 
