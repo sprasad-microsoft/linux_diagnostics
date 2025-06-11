@@ -110,10 +110,10 @@ class ToolManager(ABC):
         self.max_duration = max_duration
         self.output_subdir = output_subdir
         self.lock = threading.Lock()
-        self.end_time = {}
-        self.max_end_time = {}
-        self.proc = {}
-        self.thread = {}
+        self.end_time = 0
+        self.max_end_time = 0
+        self.proc = None
+        self.thread = None
 
     def tool_name(self):
         # Extract tool name from output_subdir, e.g. live/tcpdump -> tcpdump
@@ -121,21 +121,16 @@ class ToolManager(ABC):
 
     def extend(self, batch_id: str) -> None:
         """Start or extend the live capture window."""
-        with self.lock:
-            now = time.time()
-            if batch_id not in self.proc:
-                print(f"[Log Collector][{self.tool_name()}] Starting new capture for batch {batch_id}")
-                self.end_time[batch_id] = now + self.base_duration
-                self.max_end_time[batch_id] = now + self.max_duration
-                self._start(batch_id)
-                return
-
-            remaining = self.end_time[batch_id] - now
-            proposed_end = self.end_time[batch_id] + self.base_duration
-            if remaining < 10 and proposed_end <= self.max_end_time[batch_id]:
-                print(f"[Log Collector][{self.tool_name()}] Extending capture for batch {batch_id} by {self.base_duration} seconds")
-                self.end_time[batch_id] = proposed_end
-
+        if self._can_extend(batch_id):
+            print("yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy")
+            with self.lock:
+                if self.proc is None:
+                    self._start(batch_id)
+                else: #create symlink
+                    self.end_time += self.base_duration
+                    print(f"[Log Collector][{self.tool_name()}] Extending for batch {batch_id} end time by {self.base_duration} seconds")
+                    pass
+        
     @abstractmethod
     def _build_command(self, batch_id: str) -> list:
         ...
@@ -148,22 +143,25 @@ class ToolManager(ABC):
             f.write("running\n")
         cmd = self._build_command(batch_id)
         print(f"[Log Collector][{self.tool_name()}] Launching process for batch {batch_id}: {' '.join(cmd)}")
-        self.proc[batch_id] = subprocess.Popen(cmd)
-        self.thread[batch_id] = threading.Thread(target=self._monitor, args=(batch_id,), daemon=True)
-        self.thread[batch_id].start()
+        self.proc = subprocess.Popen(cmd)
+        self.thread = threading.Thread(target=self._monitor, args=(batch_id,), daemon=True)
+        self.thread.start()
+        self.end_time = time.time() + self.base_duration
+        self.max_end_time = time.time() + self.max_duration
 
     def _monitor(self, batch_id: str) -> None:
         print(f"[Log Collector][{self.tool_name()}] Monitoring batch {batch_id}")
-        while time.time() < self.end_time[batch_id]:
+        while time.time() < self.end_time:
             time.sleep(20)
         self._finalize(batch_id)
 
     def _finalize(self, batch_id: str) -> None:
         print(f"[Log Collector][{self.tool_name()}] Finalizing batch {batch_id}")
-        if batch_id in self.proc:
-            print(f"[Log Collector][{self.tool_name()}] Terminating process for batch {batch_id}")
-            self.proc[batch_id].terminate()
-            self.proc[batch_id].wait()
+        self.proc.terminate()
+        self.proc.wait()
+        self.proc = None
+        self.end_time = 0
+        self.max_end_time = 0
         output_path = os.path.join(self.batches_root, batch_id, self.output_subdir)
         in_progress = os.path.join(output_path, ".IN_PROGRESS")
         complete = os.path.join(output_path, ".COMPLETE")
@@ -177,19 +175,19 @@ class ToolManager(ABC):
     def stop_all(self) -> None:
         print(f"[Log Collector][{self.tool_name()}] Stopping all batches")
         with self.lock:
-            for batch_id in list(self.proc.keys()):
-                print(f"[Log Collector][{self.tool_name()}] Terminating process for batch {batch_id}")
-                self.proc[batch_id].terminate()
-                self.proc[batch_id].wait()
-            self.proc.clear()
-            self.end_time.clear()
-            self.max_end_time.clear()
-        for thread in self.thread.values():
-            if thread.is_alive():
-                thread.join(timeout=1)
-        self.thread.clear()
+            if self.proc is not None:
+                print(f"[Log Collector][{self.tool_name()}] Terminating process")
+                self.proc.terminate()
+                self.proc.wait()
+            self.proc = None
+            self.end_time = 0
+            self.max_end_time = 0
+            if self.thread is not None and self.thread.is_alive():
+                self.thread.join(timeout=1)
+        self.thread = None
 
-    def _can_extend(self, batch_id: str, now: float) -> bool:
+    #doesnt need batch_id param, only for logging i kept it
+    def _can_extend(self, batch_id: str) -> bool:
         """Check CPU and if extending would stay within max duration."""
         for _ in range(3):
             cpu_idle = psutil.cpu_times_percent(interval=0.5).idle
@@ -201,10 +199,10 @@ class ToolManager(ABC):
             print(f"[Log Collector][{self.tool_name()}] Not enough CPU to start or extend batch {batch_id}")
             return False
 
-        if batch_id not in self.max_end_time:
+        if self.end_time == 0: #new process
             return True
-        proposed_end = self.end_time[batch_id] + self.base_duration
-        if proposed_end <= self.max_end_time[batch_id]:
+        proposed_end = self.end_time + self.base_duration
+        if proposed_end <= self.max_end_time:
             return True
         print(f"[Log Collector][{self.tool_name()}] Cannot extend batch {batch_id}: would exceed max duration")
         return False
