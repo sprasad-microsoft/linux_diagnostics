@@ -97,7 +97,7 @@ class SmbinfoQuickAction(QuickAction):
         print(f"[Log Collector][smbinfo] Collecting smbinfo for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
             subprocess.run(
-                ["python3", PDEATHSIG_WRAPPER, "smbinfo", "filebasicinfo"],
+                ["python3", PDEATHSIG_WRAPPER, "smbinfo", "filebasicinfo"],  # Replace with actual smbinfo command if needed
                 stdout=f
             )
         print(f"[Log Collector][smbinfo] Finished writing smbinfo logs for batch {batch_id} at {output_path}")

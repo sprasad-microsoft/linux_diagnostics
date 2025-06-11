@@ -46,12 +46,19 @@ class EventDispatcher:
 
     def run(self):
         print("EventDispatcher started running")
+        batch_buffer = np.empty(0, dtype=event_dtype)
+        last_put = time.time()
         while not self.controller.stop_event.is_set():
             raw_events = self._poll_shm_buffer()
             batch = self._parse(raw_events)
-            if batch is not None and len(batch) > 0:
-                self.controller.eventQueue.put(batch)
-                print("[Event Dispatcher] Batch put")
+            if batch is not None:
+                batch_buffer = np.concatenate((batch_buffer, batch))
+            print(f"[Event Dispatcher] Batch buffer size: {batch_buffer.size}")
+            if batch_buffer.size >= 10 or (time.time() - last_put > 3 and batch_buffer is not None):
+                    self.controller.eventQueue.put(batch_buffer)
+                    last_put = time.time()
+                    print("[Event Dispatcher] Batch put")
+                    batch_buffer = np.empty(0, dtype=event_dtype)
             time.sleep(1)
 
         # After stop_event is set, do a final drain
