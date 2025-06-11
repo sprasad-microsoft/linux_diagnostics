@@ -51,7 +51,7 @@ class ErrorAnomalyHandler(AnomalyHandler):
 class AnomalyWatcher:
     def __init__(self, controller):
         self.controller = controller
-        self.interval = getattr(self.controller.config, "watch_interval_sec", 5)  # 5 seconds default
+        self.interval = getattr(self.controller.config, "watch_interval_sec", 1)  # 1 second default
         self.handlers: dict[AnomalyType, AnomalyHandler] = self._load_anomaly_handlers(controller.config)
 
     def _load_anomaly_handlers(self, config) -> dict:
@@ -63,35 +63,39 @@ class AnomalyWatcher:
                 handlers[AnomalyType.ERROR] = ErrorAnomalyHandler(anomaly_cfg)
         return handlers
 
-    def _get_batch(self):
-        """Fetch and combine all available batches from the eventQueue into a single numpy array."""
-        combined_batches = np.empty(0, dtype=event_dtype)
+    def _get_batch(self, first_batch=None):
+        """Fetch and combine all available batches from the eventQueue into a single numpy array.
+        Optionally include a first_batch that was already fetched (blocking)."""
+        batches = []
+        if first_batch is not None:
+            batches.append(first_batch)
         while True:
             try:
                 batch = self.controller.eventQueue.get_nowait()
-                combined_batches = np.concatenate((combined_batches,batch))
+                batches.append(batch)
             except queue.Empty:
                 break
-        return combined_batches
+        if not batches:
+            return np.empty(0, dtype=event_dtype)
+        return np.concatenate(batches) if len(batches) > 1 else batches[0]
 
     def run(self) -> None:
         while not self.controller.stop_event.is_set():
-            batch = self._get_batch()
-            #print each event (reomve this code later)
-            if batch.size>0:
-                print("[Anomaly Watcher] Batch")
-            for event in batch:
-                print(f"Event: {event}")
+            try:
+                # Block for up to interval seconds for the first batch
+                first_batch = self.controller.eventQueue.get(timeout=self.interval)
+            except queue.Empty:
+                continue
+            batch = self._get_batch(first_batch)
             if batch.size > 0:
+                print("[Anomaly Watcher] Batch")
+                for event in batch:
+                    print(f"Event: {event}")
                 for anomaly_type, handler in self.handlers.items():
-                    # this will only filter latency anomalies for now (tool=0)
                     filtered_batch = batch[batch["tool"] == 0]
-                    # filtered_batch = batch[np.where(batch["tool"] == 0)]
-                    # can do this also, but the method without np.where is faster
                     if handler.detect(filtered_batch):
                         action = self._generate_action(anomaly_type, filtered_batch)
                         self.controller.anomalyActionQueue.put(action)
-            time.sleep(self.interval)
 
     def _generate_action(self, anomaly_type: AnomalyType, batch: np.ndarray) -> dict:
         """Generate an action based on the detected anomaly."""
