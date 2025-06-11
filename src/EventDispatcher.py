@@ -60,11 +60,12 @@ class EventDispatcher:
             time.sleep(sleep_time)
 
         # After stop_event is set, do a final drain
-        raw_events = self._poll_shm_buffer()
-        batch = self._parse(raw_events)
-        if batch is not None and len(batch) > 0:
-            self.controller.eventQueue.put(batch)
-        print("EventDispatcher: Final drain complete, exiting.")
+        # raw_events = self._poll_shm_buffer()
+        # batch = self._parse(raw_events)
+        # if batch is not None and len(batch) > 0:
+        #     self.controller.eventQueue.put(batch)
+        # print("EventDispatcher: Final drain complete, exiting.")
+        #FINAL DRAIN NOT NECESSARY, AS IF HE STOPS, HE DOESNT NEED THE SERVICES ANYMORE
 
     def _poll_shm_buffer(self) -> bytes:
         """Fetch a batch of raw events from shared memory."""
