@@ -46,18 +46,13 @@ class EventDispatcher:
 
     def run(self):
         print("EventDispatcher started running")
-        sleep_time = 0.1
-        max_sleep = 2.0
         while not self.controller.stop_event.is_set():
             raw_events = self._poll_shm_buffer()
             batch = self._parse(raw_events)
             if batch is not None and len(batch) > 0:
                 self.controller.eventQueue.put(batch)
                 print("[Event Dispatcher] Batch put")
-                sleep_time = 0.1
-            else:
-                sleep_time = min(sleep_time * 2, max_sleep)  # Exponential backoff
-            time.sleep(sleep_time)
+            time.sleep(1)
 
         # After stop_event is set, do a final drain
         # raw_events = self._poll_shm_buffer()
