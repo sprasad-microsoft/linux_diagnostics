@@ -283,7 +283,8 @@ class LogCollectorManager:
         print("[Log Collector][manager] LogCollectorManager started running")
         while not self.controller.stop_event.is_set():
             try:
-                evt = self.controller.anomalyActionQueue.get(timeout=1)
+                print("[Log Collector][manager] Waiting for events in anomalyActionQueue")
+                evt = self.controller.anomalyActionQueue.get()
             except queue.Empty:
                 continue
             batch_id = self._ensure_batch_dir(evt)

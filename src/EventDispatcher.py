@@ -53,8 +53,7 @@ class EventDispatcher:
             batch = self._parse(raw_events)
             if batch is not None:
                 batch_buffer = np.concatenate((batch_buffer, batch))
-            print(f"[Event Dispatcher] Batch buffer size: {batch_buffer.size}")
-            if batch_buffer.size >= 10 or (time.time() - last_put > 3 and batch_buffer is not None):
+            if batch_buffer.size >= 10 or (time.time() - last_put > 3 and batch_buffer.size > 0 ):
                     self.controller.eventQueue.put(batch_buffer)
                     last_put = time.time()
                     print("[Event Dispatcher] Batch put")
