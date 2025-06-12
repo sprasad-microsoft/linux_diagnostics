@@ -114,6 +114,7 @@ class ToolManager(ABC):
         self.max_end_time = 0
         self.proc = None
         self.thread = None
+        self.running_batch_id = None
 
     def tool_name(self):
         # Extract tool name from output_subdir, e.g. live/tcpdump -> tcpdump
@@ -129,7 +130,7 @@ class ToolManager(ABC):
                     if self.end_time - time.time() < 10: 
                         self.end_time += self.base_duration
                     print(f"[Log Collector][{self.tool_name()}] Extending for batch {batch_id} end time by {self.base_duration} seconds")
-                    pass
+                    self._create_symlink_to_running_batch(batch_id)
         
     @abstractmethod
     def _build_command(self, batch_id: str) -> list:
@@ -155,7 +156,23 @@ class ToolManager(ABC):
             return
         self.thread = threading.Thread(target=self._monitor, args=(batch_id,), daemon=True)
         self.thread.start()
-        
+        self.running_batch_id = batch_id
+
+    def _create_symlink_to_running_batch(self, batch_id: str):
+        """Create a symlink in the current batch's output dir pointing to the running batch's output dir."""
+        if self.running_batch_id is None or self.running_batch_id == batch_id:
+            print(f"[Log Collector][{self.tool_name()}] No other running batch to symlink for batch {batch_id}")
+            return
+        src = os.path.join(self.batches_root, self.running_batch_id, self.output_subdir)
+        dst = os.path.join(self.batches_root, batch_id, self.output_subdir)
+        os.makedirs(os.path.dirname(dst), exist_ok=True)
+        try:
+            if os.path.islink(dst) or os.path.exists(dst):
+                os.remove(dst)
+            os.symlink(src, dst)
+            print(f"[Log Collector][{self.tool_name()}] Created symlink from {dst} to {src}")
+        except Exception as e:
+            print(f"[Log Collector][{self.tool_name()}] Failed to create symlink: {e}")        
 
     def _monitor(self, batch_id: str) -> None:
         print(f"[Log Collector][{self.tool_name()}] Monitoring batch {batch_id}")
@@ -172,6 +189,7 @@ class ToolManager(ABC):
         self.proc = None
         self.end_time = 0
         self.max_end_time = 0
+        self.running_batch_id = None
         output_path = os.path.join(self.batches_root, batch_id, self.output_subdir)
         in_progress = os.path.join(output_path, ".IN_PROGRESS")
         complete = os.path.join(output_path, ".COMPLETE")
@@ -209,7 +227,7 @@ class ToolManager(ABC):
             print(f"[Log Collector][{self.tool_name()}] Not enough CPU to start or extend batch {batch_id}")
             return False
 
-        if self.end_time == 0: #new process
+        if self.proc is None:  # new process
             return True
         proposed_end = self.end_time + self.base_duration
         if proposed_end <= self.max_end_time:
