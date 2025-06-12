@@ -103,7 +103,7 @@ class SmbinfoQuickAction(QuickAction):
         print(f"[Log Collector][smbinfo] Finished writing smbinfo logs for batch {batch_id} at {output_path}")
 
 class ToolManager(ABC):
-    def __init__(self, controller, batches_root, output_subdir: str = "live/tool", base_duration: int = 20, max_duration: int = 90):
+    def __init__(self, controller, batches_root, output_subdir: str = "live/tool", base_duration: int = 20, max_duration: int = 60):
         self.controller = controller
         self.batches_root = batches_root
         self.base_duration = base_duration
@@ -122,12 +122,12 @@ class ToolManager(ABC):
     def extend(self, batch_id: str) -> None:
         """Start or extend the live capture window."""
         if self._can_extend(batch_id):
-            print("yayyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy")
             with self.lock:
                 if self.proc is None:
                     self._start(batch_id)
                 else: #create symlink
-                    self.end_time += self.base_duration
+                    if self.end_time - time.time() < 10: 
+                        self.end_time += self.base_duration
                     print(f"[Log Collector][{self.tool_name()}] Extending for batch {batch_id} end time by {self.base_duration} seconds")
                     pass
         
@@ -142,23 +142,33 @@ class ToolManager(ABC):
         with open(in_progress, "w") as f:
             f.write("running\n")
         cmd = self._build_command(batch_id)
-        print(f"[Log Collector][{self.tool_name()}] Launching process for batch {batch_id}: {' '.join(cmd)}")
-        self.proc = subprocess.Popen(cmd)
-        self.thread = threading.Thread(target=self._monitor, args=(batch_id,), daemon=True)
-        self.thread.start()
+        #VVVIMP use shld set end time before running the thread bcos monitor might check with endtime 0 and stop the process
         self.end_time = time.time() + self.base_duration
         self.max_end_time = time.time() + self.max_duration
+        print(f"[Log Collector][{self.tool_name()}] Launching process for batch {batch_id}: {' '.join(cmd)}")
+        try:
+            # Capture stderr for debugging
+            self.proc = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+        except Exception as e:
+            print(f"[Log Collector][{self.tool_name()}] Failed to start process for batch {batch_id}: {e}")
+            self._finalize(batch_id)
+            return
+        self.thread = threading.Thread(target=self._monitor, args=(batch_id,), daemon=True)
+        self.thread.start()
+        
 
     def _monitor(self, batch_id: str) -> None:
         print(f"[Log Collector][{self.tool_name()}] Monitoring batch {batch_id}")
         while time.time() < self.end_time:
             time.sleep(20)
+        print(f"[Log Collector][{self.tool_name()}] Tring Tring! Time up")
         self._finalize(batch_id)
 
     def _finalize(self, batch_id: str) -> None:
         print(f"[Log Collector][{self.tool_name()}] Finalizing batch {batch_id}")
-        self.proc.terminate()
-        self.proc.wait()
+        if self.proc is not None:
+            self.proc.terminate()
+            self.proc.wait()
         self.proc = None
         self.end_time = 0
         self.max_end_time = 0
@@ -252,10 +262,10 @@ class LogCollectorManager:
             "tcpdump": lambda: self.tcpdump_manager,
             "trace-cmd": lambda: self.trace_manager,
             "dmesg": lambda: DmesgQuickAction({}, self.batches_root),
-            "debugdata": lambda: DebugDataQuickAction({}, self.batches_root),
-            "stats": lambda: StatsQuickAction({}, self.batches_root),
-            "procfs": lambda: ProcfsQuickAction({}, self.batches_root),
-            "smbinfo": lambda: SmbinfoQuickAction({}, self.batches_root),
+            #"debugdata": lambda: DebugDataQuickAction({}, self.batches_root),
+            #"stats": lambda: StatsQuickAction({}, self.batches_root),
+            #"procfs": lambda: ProcfsQuickAction({}, self.batches_root),
+            #"smbinfo": lambda: SmbinfoQuickAction({}, self.batches_root),
         }
         self.anomaly_actions = self.set_anomaly_actions()
 
