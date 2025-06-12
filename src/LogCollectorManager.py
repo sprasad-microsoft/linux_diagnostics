@@ -4,6 +4,7 @@ import threading
 import queue
 import subprocess
 import psutil
+import signal
 from concurrent.futures import ThreadPoolExecutor
 from abc import ABC, abstractmethod
 
@@ -143,13 +144,14 @@ class ToolManager(ABC):
         with open(in_progress, "w") as f:
             f.write("running\n")
         cmd = self._build_command(batch_id)
+        cmd = ["python3", PDEATHSIG_WRAPPER] + cmd
         #VVVIMP use shld set end time before running the thread bcos monitor might check with endtime 0 and stop the process
         self.end_time = time.time() + self.base_duration
         self.max_end_time = time.time() + self.max_duration
         print(f"[Log Collector][{self.tool_name()}] Launching process for batch {batch_id}: {' '.join(cmd)}")
         try:
             # Capture stderr for debugging
-            self.proc = subprocess.Popen(cmd, stderr=subprocess.PIPE)
+            self.proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, preexec_fn=os.setsid)
         except Exception as e:
             print(f"[Log Collector][{self.tool_name()}] Failed to start process for batch {batch_id}: {e}")
             self._finalize(batch_id)
@@ -181,15 +183,23 @@ class ToolManager(ABC):
         print(f"[Log Collector][{self.tool_name()}] Tring Tring! Time up")
         self._finalize(batch_id)
 
-    def _finalize(self, batch_id: str) -> None:
-        print(f"[Log Collector][{self.tool_name()}] Finalizing batch {batch_id}")
+    def _terminate_proc(self) -> None:
+        """Terminate the running process group and join the monitor thread."""
         if self.proc is not None:
-            self.proc.terminate()
+            print(f"[Log Collector][{self.tool_name()}] Terminating process")
+            os.killpg(os.getpgid(self.proc.pid), signal.SIGINT)
             self.proc.wait()
         self.proc = None
         self.end_time = 0
         self.max_end_time = 0
-        self.running_batch_id = None
+        if self.thread is not None and self.thread.is_alive():
+            if threading.current_thread() != self.thread:
+                self.thread.join(timeout=1)
+        self.thread = None
+
+    def _finalize(self, batch_id: str) -> None:
+        print(f"[Log Collector][{self.tool_name()}] Finalizing batch {batch_id}")
+        self._terminate_proc()
         output_path = os.path.join(self.batches_root, batch_id, self.output_subdir)
         in_progress = os.path.join(output_path, ".IN_PROGRESS")
         complete = os.path.join(output_path, ".COMPLETE")
@@ -203,16 +213,7 @@ class ToolManager(ABC):
     def stop_all(self) -> None:
         print(f"[Log Collector][{self.tool_name()}] Stopping all batches")
         with self.lock:
-            if self.proc is not None:
-                print(f"[Log Collector][{self.tool_name()}] Terminating process")
-                self.proc.terminate()
-                self.proc.wait()
-            self.proc = None
-            self.end_time = 0
-            self.max_end_time = 0
-            if self.thread is not None and self.thread.is_alive():
-                self.thread.join(timeout=1)
-        self.thread = None
+            self._terminate_proc()
 
     #doesnt need batch_id param, only for logging i kept it
     def _can_extend(self, batch_id: str) -> bool:
@@ -240,8 +241,13 @@ class TcpdumpManager(ToolManager):
         super().__init__(controller, batches_root, output_subdir, base_duration, max_duration)
 
     def _build_command(self, batch_id: str) -> list:
-        output_path = os.path.join(self.batches_root, batch_id, self.output_subdir, "tcpdump.1.pcap")
-        return ["python3", PDEATHSIG_WRAPPER, "tcpdump", "-i", "any", "-w", output_path]
+        output_path = os.path.join(self.batches_root, batch_id, self.output_subdir, "tcpdump.pcap")
+        os.makedirs(os.path.dirname(output_path), exist_ok=True)
+        return [
+            "tcpdump",
+            "-i", "any",
+            "-w", output_path
+        ]
 
 class TraceCmdManager(ToolManager):
     def __init__(self, controller, batches_root: str, output_subdir: str = "live/trace", base_duration: int = 20, max_duration: int = 90):
@@ -250,7 +256,7 @@ class TraceCmdManager(ToolManager):
     def _build_command(self, batch_id: str) -> list:
         output_path = os.path.join(self.batches_root, batch_id, self.output_subdir, "trace.dat")
         return [
-            "python3", PDEATHSIG_WRAPPER, "trace-cmd", "record",
+            "trace-cmd", "record",
             "-e", "sched_switch",
             "-e", "sched_wakeup",
             "-e", "sched_wakeup_new",
