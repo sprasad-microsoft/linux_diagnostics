@@ -276,7 +276,6 @@ class LogCollectorManager:
         self.controller = controller
         self.aod_output_dir = getattr(self.controller.config, "aod_output_dir", "/var/log/aod")
         self.batches_root = os.path.join(self.aod_output_dir, "batches")
-        self.batches_root = os.path.join(self.aod_output_dir, "batches")
         self.quick_actions_pool = ThreadPoolExecutor(max_workers=4)
         self.tcpdump_manager = TcpdumpManager(controller, self.batches_root, "live/tcpdump", 20, 90)
         self.trace_manager = TraceCmdManager(controller, self.batches_root, "live/trace", 20, 90)
