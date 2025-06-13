@@ -8,16 +8,19 @@ class SpaceWatcher:
     def __init__(self, controller):
         self.controller = controller
         cfg = controller.config.cleanup
-        self.max_age = getattr(self.controller.config, "max_log_age_days", 2)
-        self.max_size = getattr(self.controller.config, "max_total_log_size_mb", 200)
-        self.cleanup_interval = getattr(self.controller.config, "cleanup_interval_sec", 60)
-        self.aod_output_dir = getattr(self.controller.config, "aod_output_dir", "/var/log/aod")
+        print(f"[SpaceWatcher] Initializing with config: {cfg}")
+        self.max_age = cfg.max_log_age_days if hasattr(cfg, "max_log_age_days") else 2
+        self.max_size = cfg.max_total_log_size_mb if hasattr(cfg, "max_total_log_size_mb") else 200
+        self.cleanup_interval = cfg.cleanup_interval_sec if hasattr(cfg, "cleanup_interval_sec") else 60
+        self.aod_output_dir = cfg.aod_output_dir if hasattr(cfg, "aod_output_dir") else "/var/log/aod"
+        print(f"[SpaceWatcher] Initializing with max_age={self.max_age} days, max_size={self.max_size} MB, interval={self.cleanup_interval} sec")
         self.batches_root = Path(os.path.join(self.aod_output_dir, "batches"))
         self.last_full_cleanup = time.time()
 
     def run(self) -> None:
         print("SpaceWatcher started running")
         while not self.controller.stop_event.is_set():
+            print("[SpaceWatcher] Checking disk space and cleanup needs...")
             if self._check_space():
                 self.cleanup_by_size()
             elif self._full_cleanup_needed():
@@ -35,9 +38,8 @@ class SpaceWatcher:
     def _check_space(self) -> bool:
         """Check if disk space is below a threshold using pathlib."""
         total_size = sum(f.stat().st_size for f in self.batches_root.glob('**/*') if f.is_file())
-        total_size_mb = total_size
-        if total_size_mb > self.max_size * 1024 * 1024:  # Convert MB to bytes
-            print(f"[SpaceWatcher] Total log size {total_size_mb:.2f} MB exceeds max {self.max_size} MB")
+        if total_size > self.max_size * 1024 * 1024:  # Convert MB to bytes
+            print(f"[SpaceWatcher] Total log size {total_size / (1024 * 1024):.2f} MB exceeds max {self.max_size} MB")
             return True
         return False
 
