@@ -92,7 +92,6 @@ class AnomalyWatcher:
                         action = self._generate_action(anomaly_type, filtered_batch)
                         self.controller.anomalyActionQueue.put(action)
             time.sleep(self.interval)
-            print("oof")
 
     def _generate_action(self, anomaly_type: AnomalyType, batch: np.ndarray) -> dict:
         """Generate an action based on the detected anomaly."""

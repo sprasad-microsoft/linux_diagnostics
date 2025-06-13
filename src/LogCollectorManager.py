@@ -22,7 +22,7 @@ class QuickAction(ABC):
 
 class JournalctlQuickAction(QuickAction):
     def execute(self, batch_id: str):
-        output_path = os.path.join(self.batches_root, batch_id, "quick", "journalctl.log")
+        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", "journalctl.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         print(f"[Log Collector][journalctl] Collecting journalctl logs for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
@@ -34,7 +34,7 @@ class JournalctlQuickAction(QuickAction):
 
 class CifsstatsQuickAction(QuickAction):
     def execute(self, batch_id: str) -> None:
-        output_path = os.path.join(self.batches_root, batch_id, "quick", "cifsstats.log")
+        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", "cifsstats.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         print(f"[Log Collector][cifsstats] Collecting cifsstats logs for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
@@ -46,7 +46,7 @@ class CifsstatsQuickAction(QuickAction):
 
 class DmesgQuickAction(QuickAction):
     def execute(self, batch_id: str):
-        output_path = os.path.join(self.batches_root, batch_id, "quick", "dmesg.log")
+        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", "dmesg.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         print(f"[Log Collector][dmesg] Collecting dmesg logs for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
@@ -58,7 +58,7 @@ class DmesgQuickAction(QuickAction):
 
 class DebugDataQuickAction(QuickAction):
     def execute(self, batch_id: str):
-        output_path = os.path.join(self.batches_root, batch_id, "quick", "Debugdata.log")
+        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", "Debugdata.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         print(f"[Log Collector][debugdata] Collecting debug data for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
@@ -70,7 +70,7 @@ class DebugDataQuickAction(QuickAction):
 
 class MountsQuickAction(QuickAction):
     def execute(self, batch_id: str):
-        output_path = os.path.join(self.batches_root, batch_id, "quick", "mounts.log")
+        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", "mounts.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         print(f"[Log Collector][mounts] Collecting /proc/mounts for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
@@ -82,7 +82,7 @@ class MountsQuickAction(QuickAction):
 
 class SmbinfoQuickAction(QuickAction):
     def execute(self, batch_id: str):
-        output_path = os.path.join(self.batches_root, batch_id, "quick", "smbinfo.log")
+        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", "smbinfo.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         print(f"[Log Collector][smbinfo] Collecting smbinfo for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
@@ -94,7 +94,7 @@ class SmbinfoQuickAction(QuickAction):
 
 class SysLogsQuickAction(QuickAction):
     def execute(self, batch_id: str):
-        output_path = os.path.join(self.batches_root, batch_id, "quick", "syslogs.log")
+        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", "syslogs.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         print(f"[Log Collector][syslogs] Collecting syslogs for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
@@ -139,7 +139,7 @@ class ToolManager(ABC):
         ...
 
     def _start(self, batch_id: str) -> None:
-        output_path = os.path.join(self.batches_root, batch_id, self.output_subdir)
+        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", self.output_subdir)
         os.makedirs(output_path, exist_ok=True)
         in_progress = os.path.join(output_path, ".IN_PROGRESS")
         with open(in_progress, "w") as f:
@@ -166,8 +166,8 @@ class ToolManager(ABC):
         if self.running_batch_id is None or self.running_batch_id == batch_id:
             print(f"[Log Collector][{self.tool_name()}] No other running batch to symlink for batch {batch_id}")
             return
-        src = os.path.join(self.batches_root, self.running_batch_id, self.output_subdir)
-        dst = os.path.join(self.batches_root, batch_id, self.output_subdir)
+        src = os.path.join(self.batches_root, f"aod_{self.running_batch_id}", self.output_subdir)
+        dst = os.path.join(self.batches_root, f"aod_{batch_id}", self.output_subdir)
         os.makedirs(os.path.dirname(dst), exist_ok=True)
         try:
             if os.path.islink(dst) or os.path.exists(dst):
@@ -201,7 +201,7 @@ class ToolManager(ABC):
     def _finalize(self, batch_id: str) -> None:
         print(f"[Log Collector][{self.tool_name()}] Finalizing batch {batch_id}")
         self._terminate_proc()
-        output_path = os.path.join(self.batches_root, batch_id, self.output_subdir)
+        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", self.output_subdir)
         in_progress = os.path.join(output_path, ".IN_PROGRESS")
         complete = os.path.join(output_path, ".COMPLETE")
         if os.path.exists(in_progress):
@@ -242,7 +242,7 @@ class TcpdumpManager(ToolManager):
         super().__init__(controller, batches_root, output_subdir, base_duration, max_duration)
 
     def _build_command(self, batch_id: str) -> list:
-        output_path = os.path.join(self.batches_root, batch_id, self.output_subdir, "tcpdump.pcap")
+        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", self.output_subdir, "tcpdump.pcap")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         return [
             "tcpdump",
@@ -256,7 +256,7 @@ class TraceCmdManager(ToolManager):
         super().__init__(controller, batches_root, output_subdir, base_duration, max_duration)
 
     def _build_command(self, batch_id: str) -> list:
-        output_path = os.path.join(self.batches_root, batch_id, self.output_subdir, "trace.dat")
+        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", self.output_subdir, "trace.dat")
         return [
             "trace-cmd", "record",
             "-e", "sched_switch",
@@ -306,7 +306,7 @@ class LogCollectorManager:
 
     def _ensure_batch_dir(self, evt) -> str:
         batch_id = str(evt.get("batch_id", evt.get("timestamp", int(time.time()))))
-        batch_dir = os.path.join(self.batches_root, batch_id)
+        batch_dir = os.path.join(f"{self.batches_root}", batch_id)
         os.makedirs(batch_dir, exist_ok=True)
         print(f"[Log Collector][manager] Ensured batch directory exists: {batch_dir}")
         return batch_id
