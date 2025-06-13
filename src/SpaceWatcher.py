@@ -46,84 +46,103 @@ class SpaceWatcher:
     def cleanup_by_age(self) -> None:
         """Delete batch directories or files older than max_age days."""
         cutoff = time.time() - self.max_age * 24 * 60 * 60
-        batches = [d for d in self.batches_root.iterdir()]
-        if not batches:
-            print("[SpaceWatcher] No batch entries to cleanup by age.")
+        #trying to ensure that we only delete directories created by AOD
+        #for now we are assuming user wont create directories starting with "aod_"
+        to_delete_batches = [d for d in self.batches_root.iterdir() if d.is_dir() and d.name.startswith("aod_") and d.stat().st_mtime < cutoff]
+        if not to_delete_batches:
+            print("[SpaceWatcher] No AOD batch entries to cleanup by age.")
             return
-        batches = np.array(batches)
-        mtimes = np.array([b.stat().st_mtime for b in batches])
-        to_delete = batches[mtimes < cutoff]
         deleted = 0
-        for entry in to_delete:
+        for entry in to_delete_batches:
             try:
-                if entry.is_dir():
-                    shutil.rmtree(entry)
-                else:
-                    entry.unlink()
+                shutil.rmtree(entry)
                 deleted += 1
                 print(f"[SpaceWatcher] Deleted old batch entry {entry}")
             except Exception as e:
                 print(f"[SpaceWatcher] Failed to delete {entry}: {e}")
         print(f"[SpaceWatcher] Age-based cleanup complete. Deleted {deleted} batch entries.")
-        
-    def _get_completed_batches(self):
+
+    def _get_completed_aod_batches(self):
         completed_batches = []
+        in_progress_batches = []
+        batch_size_map = {}
         for batch_dir in self.batches_root.iterdir():
+
             if not batch_dir.is_dir():
-                completed_batches.append(batch_dir)
+                batch_size_map[batch_dir] = batch_dir.stat().st_size
                 continue
+
+            batch_size_map[batch_dir] = sum(f.stat().st_size for f in batch_dir.glob('**/*') if f.is_file())
+            
+            if not batch_dir.name.startswith("aod_"):
+                continue
+
             # Check quick/.IN_PROGRESS
             quick_dir = batch_dir / "quick"
             if quick_dir.exists() and (quick_dir / ".IN_PROGRESS").exists():
-                print(f"[SpaceWatcher] Skipping {batch_dir} due to .IN_PROGRESS in quick directory")
+                print(f"[SpaceWatcher] Giving lower delete priority to {batch_dir} due to .IN_PROGRESS in quick directory")
+                in_progress_batches.append(batch_dir)
                 continue
+
             # Check live/<tool>/.IN_PROGRESS
             live_dir = batch_dir / "live"
             if live_dir.exists():
                 in_progress_found = False
                 for tool_dir in live_dir.iterdir():
                     if tool_dir.is_dir() and (tool_dir / ".IN_PROGRESS").exists():
-                        print(f"[SpaceWatcher] Skipping {batch_dir} due to .IN_PROGRESS in live/{tool_dir.name} directory")
+                        print(f"[SpaceWatcher] Giving lower delete priority to {batch_dir} due to .IN_PROGRESS in live/{tool_dir.name} directory")
                         in_progress_found = True
                         break
                 if in_progress_found:
+                    in_progress_batches.append(batch_dir)
                     continue
             # If no .IN_PROGRESS found, add batch_dir
             completed_batches.append(batch_dir)
-        return completed_batches
+        return completed_batches, in_progress_batches, batch_size_map
 
+    #rewrite so that u only delete directories created by AOD
     def cleanup_by_size(self) -> None:
         """Delete largest completed batch directories or files until total size is under max_size."""
-        batches = self._get_completed_batches()
-        if not batches:
+        comp_batches, in_progress_batches, batch_size_map = self._get_completed_aod_batches()
+        if not comp_batches and not in_progress_batches:
             print("[SpaceWatcher] No eligible batches to cleanup by size.")
             return
-        batches = np.array(batches)
-        # Calculate size for each batch (directory or file)
-        def batch_size(b):
-            if b.is_dir():
-                return sum(f.stat().st_size for f in b.glob('**/*') if f.is_file())
-            else:
-                return b.stat().st_size
-        sizes = np.array([batch_size(b) for b in batches])
-        sorted_indices = np.argsort(-sizes)  # Largest first
+        comp_batches = np.array(comp_batches)
+        batch_size_map = np.vectorize(batch_size_map.get)
+
+        sorted_batches = comp_batches[np.argsort(-1*batch_size_map(comp_batches))]
         total_size = sum(f.stat().st_size for f in self.batches_root.glob('**/*') if f.is_file())
         max_bytes = self.max_size * 1024 * 1024
         print(f"[SpaceWatcher] Total size of batches: {total_size / (1024 * 1024):.2f} MB, max allowed: {self.max_size} MB")
+        
         deleted = 0
-        for idx in sorted_indices:
-            if total_size <= max_bytes / 2:
+        # first check if deleting completed batches suffices
+        for batch in sorted_batches:
+            if total_size <= max_bytes * .5:
                 break
-            batch = batches[idx]
-            batch_sz = sizes[idx]
+            batch_sz = batch_size_map(batch)
             try:
-                if batch.is_dir():
-                    shutil.rmtree(batch)
-                else:
-                    batch.unlink()
+                shutil.rmtree(batch)
                 total_size -= batch_sz
                 deleted += 1
                 print(f"[SpaceWatcher] Deleted batch {batch} ({batch_sz} bytes)")
             except Exception as e:
                 print(f"[SpaceWatcher] Failed to delete {batch}: {e}")
+        
+        # if still above threshold, delete in-progress batches
+        if total_size > max_bytes * .8:
+            in_progress_batches = np.array(in_progress_batches)
+            sorted_in_progress = in_progress_batches[np.argsort(-1*batch_size_map(in_progress_batches))]
+            for batch in sorted_in_progress:
+                if total_size <= max_bytes * .8:
+                    break
+                batch_sz = batch_size_map(batch)
+                try:
+                    shutil.rmtree(batch)
+                    total_size -= batch_sz
+                    deleted += 1
+                    print(f"[SpaceWatcher] Deleted in-progress batch {batch} ({batch_sz} bytes)")
+                except Exception as e:
+                    print(f"[SpaceWatcher] Failed to delete in-progress {batch}: {e}")
+    
         print(f"[SpaceWatcher] Size-based cleanup complete. Deleted {deleted} batches.")
