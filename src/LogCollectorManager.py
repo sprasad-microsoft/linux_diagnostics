@@ -58,12 +58,12 @@ class DmesgQuickAction(QuickAction):
 
 class DebugDataQuickAction(QuickAction):
     def execute(self, batch_id: str):
-        output_path = os.path.join(self.batches_root, batch_id, "quick", "debugdata.log")
+        output_path = os.path.join(self.batches_root, batch_id, "quick", "Debugdata.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         print(f"[Log Collector][debugdata] Collecting debug data for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
             subprocess.run(
-                ["python3", PDEATHSIG_WRAPPER, "cat", "/proc/fs/cifs/debugdata"],  # Replace with actual debug data command
+                ["python3", PDEATHSIG_WRAPPER, "cat", "/proc/fs/cifs/DebugData"],  # Replace with actual debug data command
                 stdout=f
             )
         print(f"[Log Collector][debugdata] Finished writing debug data for batch {batch_id} at {output_path}")

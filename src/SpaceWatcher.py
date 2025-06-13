@@ -9,10 +9,10 @@ class SpaceWatcher:
         self.controller = controller
         cfg = controller.config.cleanup
         print(f"[SpaceWatcher] Initializing with config: {cfg}")
-        self.max_age = cfg.max_log_age_days if hasattr(cfg, "max_log_age_days") else 2
-        self.max_size = cfg.max_total_log_size_mb if hasattr(cfg, "max_total_log_size_mb") else 200
-        self.cleanup_interval = cfg.cleanup_interval_sec if hasattr(cfg, "cleanup_interval_sec") else 60
-        self.aod_output_dir = cfg.aod_output_dir if hasattr(cfg, "aod_output_dir") else "/var/log/aod"
+        self.max_age = cfg.get("max_log_age_days", 2)  # Default to 2 days if not set
+        self.max_size = cfg.get("max_total_log_size_mb", 200)  # Default to 200 MB if not set
+        self.cleanup_interval = cfg.get("cleanup_interval_sec", 60)  # Default to 60 sec if not set
+        self.aod_output_dir = cfg.get("aod_output_dir", "/var/log/aod")  # Default to /var/log/aod if not set
         print(f"[SpaceWatcher] Initializing with max_age={self.max_age} days, max_size={self.max_size} MB, interval={self.cleanup_interval} sec")
         self.batches_root = Path(os.path.join(self.aod_output_dir, "batches"))
         self.last_full_cleanup = time.time()
@@ -75,6 +75,7 @@ class SpaceWatcher:
             # Check quick/.IN_PROGRESS
             quick_dir = batch_dir / "quick"
             if quick_dir.exists() and (quick_dir / ".IN_PROGRESS").exists():
+                print(f"[SpaceWatcher] Skipping {batch_dir} due to .IN_PROGRESS in quick directory")
                 continue
             # Check live/<tool>/.IN_PROGRESS
             live_dir = batch_dir / "live"
@@ -82,6 +83,7 @@ class SpaceWatcher:
                 in_progress_found = False
                 for tool_dir in live_dir.iterdir():
                     if tool_dir.is_dir() and (tool_dir / ".IN_PROGRESS").exists():
+                        print(f"[SpaceWatcher] Skipping {batch_dir} due to .IN_PROGRESS in live/{tool_dir.name} directory")
                         in_progress_found = True
                         break
                 if in_progress_found:
@@ -105,11 +107,12 @@ class SpaceWatcher:
                 return b.stat().st_size
         sizes = np.array([batch_size(b) for b in batches])
         sorted_indices = np.argsort(-sizes)  # Largest first
-        total_size = sizes.sum()
+        total_size = sum(f.stat().st_size for f in self.batches_root.glob('**/*') if f.is_file())
         max_bytes = self.max_size * 1024 * 1024
+        print(f"[SpaceWatcher] Total size of batches: {total_size / (1024 * 1024):.2f} MB, max allowed: {self.max_size} MB")
         deleted = 0
         for idx in sorted_indices:
-            if total_size <= max_bytes:
+            if total_size <= max_bytes / 2:
                 break
             batch = batches[idx]
             batch_sz = sizes[idx]
