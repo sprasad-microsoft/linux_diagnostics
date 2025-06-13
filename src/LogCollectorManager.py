@@ -206,7 +206,7 @@ class ToolManager(ABC):
         if os.path.exists(in_progress):
             os.rename(in_progress, complete)
             print(f"[Log Collector][{self.tool_name()}] Renamed {in_progress} to {complete}")
-        self.controller.archiveQueue.put((batch_id, self.output_subdir, None))
+        self.controller.archiveQueue.put(self.output_subdir)
         print(f"[Log Collector][{self.tool_name()}] Added batch {batch_id} to archive queue")
         print(f"[Log Collector][{self.tool_name()}] Finished writing logs for batch {batch_id} in {output_path}")
         
@@ -355,7 +355,8 @@ class LogCollectorManager:
                     os.rename(in_progress, completed)
                     print(f"[Log Collector][manager] Renamed {in_progress} to {completed}")
                 print(f"[Log Collector][manager] Adding quick actions for batch {batch_id} to archive queue")
-                self.controller.archiveQueue.put((batch_id, "quick", None))
+                quick_output_dir = os.path.join(self.batches_root, f"aod_{batch_id}", "quick")
+                self.controller.archiveQueue.put(quick_output_dir)
                 any_quick_action = False
                 quick_actions = []
             self.controller.anomalyActionQueue.task_done()
