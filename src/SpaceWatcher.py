@@ -23,7 +23,7 @@ class SpaceWatcher:
             print("[SpaceWatcher] Checking disk space and cleanup needs...")
             if self._check_space():
                 self.cleanup_by_size()
-            elif self._full_cleanup_needed():
+            if self._full_cleanup_needed():
                 self.cleanup_by_age()
             time.sleep(self.cleanup_interval)
 
