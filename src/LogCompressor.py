@@ -23,6 +23,7 @@ class LogCompressor:
     
     def _compress(self, output_subdir):
         archive_path = output_subdir.rstrip(os.sep) + ".tar.gz"
+        print(f"Compressing logs from {output_subdir} into {archive_path}")
         with tarfile.open(archive_path, "w:gz") as tar:
             tar.add(output_subdir, arcname=os.path.basename(output_subdir))
         print(f"Compressed logs into {archive_path}")
