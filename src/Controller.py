@@ -5,10 +5,8 @@ import os
 import signal
 import time
 import traceback
-import signal
-import argparse
 
-from shared_data import *
+from shared_data import ALL_SMB_CMDS
 from ConfigManager import ConfigManager
 from EventDispatcher import EventDispatcher
 from AnomalyWatcher import AnomalyWatcher
@@ -17,15 +15,12 @@ from LogCompressor import LogCompressor
 from AuditLogger import AuditLogger
 from SpaceWatcher import SpaceWatcher
 
+
 class Controller:
 
     def __init__(self, config_path: str):
         self.stop_event = threading.Event()
         self.config = ConfigManager(config_path).data
-        print("Parsed config file")
-        import pprint
-        pp = pprint.PrettyPrinter(indent=2)
-        pp.pprint(self.config)
         self.threads = []
         self.eventQueue = queue.Queue()
         self.anomalyActionQueue = queue.Queue()
@@ -37,9 +32,10 @@ class Controller:
             while not self.stop_event.is_set():
                 try:
                     target(*args, **kwargs)
-                except Exception as e:
+                except Exception: # pylint: disable=broad-except
                     print(f"{name} died: {traceback.format_exc()}")
                     time.sleep(1)  # Wait before restarting
+
         t = threading.Thread(target=runner, name=name, daemon=True)
         t.start()
         print(f"Started thread {name} with ID {t.ident}")
@@ -60,18 +56,20 @@ class Controller:
                 print("eBPF process stopped gracefully")
                 break
             time.sleep(1)
-      
+
     def _start_ebpf_process(self):
         wrapper_path = os.path.join(os.path.dirname(__file__), "pdeathsig_wrapper.py")
         ebpf_binary_path = os.path.join(os.path.dirname(__file__), "smbsloweraod")
         x, y = self._get_ebpf_args()
         self.ebpf_process = subprocess.Popen(
             ["python3", wrapper_path, ebpf_binary_path, "-m", str(x), "-c", y],
-            preexec_fn=os.setsid
+            preexec_fn=os.setsid,
         )
-        #for now im launching smbslower by default
-        #later as per the config file, we shld launch the necessary tools
-        print(f"Started new eBPF process with PID {self.ebpf_process.pid} and args: -m {x} -c {y}")
+        # for now im launching smbslower by default
+        # later as per the config file, we shld launch the necessary tools
+        print(
+            f"Started new eBPF process with PID {self.ebpf_process.pid} and args: -m {x} -c {y}"
+        )
 
     def _get_ebpf_args(self):
         # Find the latency anomaly config
@@ -85,13 +83,19 @@ class Controller:
             raise RuntimeError("No latency anomaly config found!")
 
         # x: minimum of all thresholds (including default)
-        thresholds = [v for v in latency_anomaly.track.values() if v is not None and v >= 0]
+        thresholds = [
+            v for v in latency_anomaly.track.values() if v is not None and v >= 0
+        ]
         if latency_anomaly.default_threshold_ms is not None:
             thresholds.append(latency_anomaly.default_threshold_ms)
         x = min(thresholds)
 
         # y: list of all SMB commands we want to track, as numbers, comma-separated
-        smbcmds = [str(ALL_SMB_CMDS[cmd]) for cmd, v in latency_anomaly.track.items() if v is not None and v >= 0]
+        smbcmds = [
+            str(ALL_SMB_CMDS[cmd])
+            for cmd, v in latency_anomaly.track.items()
+            if v is not None and v >= 0
+        ]
         y = ",".join(smbcmds)
         return x, y
 
@@ -111,11 +115,13 @@ class Controller:
 
     def run(self) -> None:
 
-        process_thread = threading.Thread(target=self._supervise_process, name="ProcessSupervisor", daemon=True)
+        process_thread = threading.Thread(
+            target=self._supervise_process, name="ProcessSupervisor", daemon=True
+        )
         process_thread.start()
         print(f"Started thread eBPFProcessSupervisor with ID {process_thread.ident}")
         self.threads.append(process_thread)
-        
+
         self.event_dispatcher = EventDispatcher(self)
         self.log_collector_manager = LogCollectorManager(self)
         self._supervise_thread("EventDispatcher", self.event_dispatcher.run)
@@ -127,8 +133,9 @@ class Controller:
         self.stop_event.wait()
         self._shutdown()
 
+
 def main():
-    
+
     # Check if script is running as root
     if os.geteuid() != 0:
         raise RuntimeError("Controller daemon must be run as root.")
@@ -149,10 +156,12 @@ def main():
 
     controller.run()
 
+
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
         import traceback
+
         print("Fatal error in main():")
         traceback.print_exc()

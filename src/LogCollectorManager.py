@@ -9,6 +9,7 @@ import concurrent.futures
 from abc import ABC, abstractmethod
 
 PDEATHSIG_WRAPPER = os.path.join(os.path.dirname(__file__), "pdeathsig_wrapper.py")
+TOOL_SHUTDOWN_SLEEP_SEC = 10
 
 class QuickAction(ABC):
     def __init__(self, params: dict):
@@ -117,6 +118,9 @@ class ToolManager(ABC):
         self.proc = None
         self.thread = None
         self.running_batch_id = None
+        self.in_cooldown = False
+        self.cooldown_end_time = 0
+        self.stop_event = threading.Event()
 
     def tool_name(self):
         # Extract tool name from output_subdir, e.g. live/tcpdump -> tcpdump
@@ -124,12 +128,23 @@ class ToolManager(ABC):
 
     def extend(self, batch_id: str) -> None:
         """Start or extend the live capture window."""
+        with self.lock:
+            if self.in_cooldown:
+                if time.time() >= self.cooldown_end_time:
+                    # Cooldown has expired
+                    print(f"[Log Collector][{self.tool_name()}] Cooldown period ended")
+                    self.in_cooldown = False
+                else:
+                    # Still in cooldown
+                    print(f"[Log Collector][{self.tool_name()}] In cooldown period, rejecting batch {batch_id}")
+                    return
+        
         if self._can_extend(batch_id):
             with self.lock:
                 if self.proc is None:
                     self._start(batch_id)
-                else: #create symlink
-                    if self.end_time - time.time() < 10: 
+                else:  # create symlink
+                    if self.end_time - time.time() < 10:
                         self.end_time += self.base_duration
                     print(f"[Log Collector][{self.tool_name()}] Extending for batch {batch_id} end time by {self.base_duration} seconds")
                     self._create_symlink_to_running_batch(batch_id)
@@ -179,6 +194,9 @@ class ToolManager(ABC):
     def _monitor(self, batch_id: str) -> None:
         print(f"[Log Collector][{self.tool_name()}] Monitoring batch {batch_id}")
         while time.time() < self.end_time:
+            if self.stop_event.is_set():
+                print(f"[Log Collector][{self.tool_name()}] Stop event set, terminating monitor for batch {batch_id}")
+                return
             time.sleep(20)
         print(f"[Log Collector][{self.tool_name()}] Tring Tring! Time up")
         self._finalize(batch_id)
@@ -187,7 +205,7 @@ class ToolManager(ABC):
         """Terminate the running process group and join the monitor thread."""
         if self.proc is not None:
             print(f"[Log Collector][{self.tool_name()}] Terminating process")
-            os.killpg(os.getpgid(self.proc.pid), signal.SIGINT)
+            self.proc.terminate()
             self.proc.wait()
         self.proc = None
         self.end_time = 0
@@ -209,11 +227,17 @@ class ToolManager(ABC):
         self.controller.archiveQueue.put(self.output_subdir)
         print(f"[Log Collector][{self.tool_name()}] Added batch {batch_id} to archive queue")
         print(f"[Log Collector][{self.tool_name()}] Finished writing logs for batch {batch_id} in {output_path}")
-        
+        with self.lock:
+            self.in_cooldown = True
+            self.cooldown_end_time = time.time() + TOOL_SHUTDOWN_SLEEP_SEC
+            print(f"[Log Collector][{self.tool_name()}] Entered cooldown period for {TOOL_SHUTDOWN_SLEEP_SEC} seconds after batch {batch_id}")
+
     def stop_all(self) -> None:
         print(f"[Log Collector][{self.tool_name()}] Stopping all batches")
         with self.lock:
+            self.stop_event.set()
             self._terminate_proc()
+            self.in_cooldown = False
 
     #doesnt need batch_id param, only for logging i kept it
     def _can_extend(self, batch_id: str) -> bool:
