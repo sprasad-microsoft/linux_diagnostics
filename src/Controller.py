@@ -1,3 +1,9 @@
+"""
+Main controller module for the AODv2 service.
+Responsible for orchestrating startup, configuration, process supervision,
+and graceful shutdown of all service components.
+"""
+
 import threading
 import queue
 import subprocess
@@ -17,8 +23,10 @@ from SpaceWatcher import SpaceWatcher
 
 
 class Controller:
+    """Main controller class for the AODv2 service."""
 
     def __init__(self, config_path: str):
+        """Manages configuration, starts and supervises all service components, and coordinates graceful shutdown."""
         self.stop_event = threading.Event()
         self.config = ConfigManager(config_path).data
         self.threads = []
@@ -26,13 +34,27 @@ class Controller:
         self.anomalyActionQueue = queue.Queue()
         self.archiveQueue = queue.Queue()
         self.auditQueue = queue.Queue()
+        self.processes = {}
+        self.tool_starters = {
+            "smbslower": self.start_smbsloweraod,
+            # "smbiosnoop": self.start_smbiosnoop,
+        }
+
+        self.event_dispatcher = EventDispatcher(self)
+        self.log_collector_manager = LogCollectorManager(self)
+        self.log_compressor = LogCompressor(self)
+        self.audit_logger = AuditLogger(self)
+        self.space_watcher = SpaceWatcher(self)
+        self.anomaly_watcher = AnomalyWatcher(self)
 
     def _supervise_thread(self, name: str, target: callable, *args, **kwargs) -> None:
+        """Start and supervise a thread, restarting it if it dies unexpectedly."""
+
         def runner():
             while not self.stop_event.is_set():
                 try:
                     target(*args, **kwargs)
-                except Exception: # pylint: disable=broad-except
+                except Exception:  # pylint: disable=broad-except
                     print(f"{name} died: {traceback.format_exc()}")
                     time.sleep(1)  # Wait before restarting
 
@@ -41,68 +63,60 @@ class Controller:
         print(f"Started thread {name} with ID {t.ident}")
         self.threads.append(t)
 
-    def _supervise_process(self) -> None:
+    def _supervise_process(self, name: str, start_func: callable) -> None:
+        """Supervise a process, restarting it if it exits unexpectedly."""
         while not self.stop_event.is_set():
-            self._start_ebpf_process()
+            process = start_func()
+            self.processes[name] = process
+            print(f"Started {name} process with PID {process.pid}")
             while True:
                 if self.stop_event.wait(timeout=1):
                     break
-                if self.ebpf_process.poll() is not None:
-                    print("eBPF process exited unexpectedly, restarting...")
+                if process.poll() is not None:
+                    print(
+                        f"{name} process exited unexpectedly with code {process.returncode}, restarting..."
+                    )
                     break
             if self.stop_event.is_set():
-                os.killpg(os.getpgid(self.ebpf_process.pid), signal.SIGINT)
-                self.ebpf_process.wait(timeout=5)
-                print("eBPF process stopped gracefully")
+                try:
+                    os.killpg(os.getpgid(process.pid), signal.SIGINT)
+                    process.wait(timeout=5)
+                    print(f"{name} process stopped gracefully")
+                except Exception:  # pylint: disable=broad-except
+                    print(f"{name} process did not stop gracefully")
                 break
             time.sleep(1)
 
-    def _start_ebpf_process(self):
-        wrapper_path = os.path.join(os.path.dirname(__file__), "pdeathsig_wrapper.py")
-        ebpf_binary_path = os.path.join(os.path.dirname(__file__), "smbsloweraod")
-        x, y = self._get_ebpf_args()
-        self.ebpf_process = subprocess.Popen(
-            ["python3", wrapper_path, ebpf_binary_path, "-m", str(x), "-c", y],
-            preexec_fn=os.setsid,
-        )
-        # for now im launching smbslower by default
-        # later as per the config file, we shld launch the necessary tools
-        print(
-            f"Started new eBPF process with PID {self.ebpf_process.pid} and args: -m {x} -c {y}"
-        )
+    def _get_smbsloweraod_args(self):
+        """Get arguments for the smbsloweraod process based on the latency anomaly config."""
 
-    def _get_ebpf_args(self):
-        # Find the latency anomaly config
-        latency_anomaly = None
-        for anomaly in self.config.guardian.anomalies.values():
-            if anomaly.type.lower() == "latency":
-                latency_anomaly = anomaly
-                break
-
+        latency_anomaly = self.config.guardian.anomalies.get("latency")
         if latency_anomaly is None:
-            raise RuntimeError("No latency anomaly config found!")
+            return 10, list(ALL_SMB_CMDS.values())  # Default threshold is 10
 
-        # x: minimum of all thresholds (including default)
-        thresholds = [
-            v for v in latency_anomaly.track.values() if v is not None and v >= 0
-        ]
-        if latency_anomaly.default_threshold_ms is not None:
-            thresholds.append(latency_anomaly.default_threshold_ms)
-        x = min(thresholds)
+        thresholds = [threshold for threshold in latency_anomaly.track.values()]
+        min_threshold = min(thresholds)
 
-        # y: list of all SMB commands we want to track, as numbers, comma-separated
-        smbcmds = [
-            str(ALL_SMB_CMDS[cmd])
-            for cmd, v in latency_anomaly.track.items()
-            if v is not None and v >= 0
-        ]
-        y = ",".join(smbcmds)
-        return x, y
+        # track_cmds: list of all SMB commands we want to track, as numbers, comma-separated
+        smbcmds = [str(ALL_SMB_CMDS[cmd]) for cmd, threshold in latency_anomaly.track.items()]
+        track_cmds = ",".join(smbcmds)
+        return min_threshold, track_cmds
+
+    def start_smbsloweraod(self) -> subprocess.Popen:
+        """Start the smbsloweraod process and return the process object."""
+        ebpf_binary_path = os.path.join(os.path.dirname(__file__), "smbsloweraod")
+        min_threshold, track_cmds = self._get_smbsloweraod_args()
+        return subprocess.Popen(
+            [ebpf_binary_path, "-m", str(min_threshold), "-c", track_cmds],
+            start_new_session=True,
+        )
 
     def stop(self) -> None:
+        """Signal all threads and processes to stop."""
         self.stop_event.set()
 
     def _shutdown(self) -> None:
+        """Shutdown all threads and components gracefully."""
         for thread in self.threads:
             thread.join(timeout=5)
             print(f"Thread {thread.name} with ID {thread.ident} has been shut down")
@@ -113,28 +127,42 @@ class Controller:
         if hasattr(self, "log_collector_manager"):
             self.log_collector_manager.stop()
 
+    def _extract_tools(self) -> None:
+        """Extract the set of ebpf tools to run from the config."""
+        tool_names = set()
+        for anomaly in self.config.guardian.anomalies.values():
+            tool_names.add(anomaly.tool)
+        return tool_names
+
     def run(self) -> None:
+        """Start all supervisor threads and wait for shutdown."""
+        tool_names = self._extract_tools()
+        for tool_name in tool_names:
+            start_func = self.tool_starters.get(tool_name)
+            if start_func:
+                t = threading.Thread(
+                    target=self._supervise_process,
+                    args=(tool_name, start_func),
+                    name=f"{tool_name}_Supervisor",
+                    daemon=True,
+                )
+                t.start()
+                self.threads.append(t)
+            else:
+                print(f"Warning: No start function defined for tool '{tool_name}'")
 
-        process_thread = threading.Thread(
-            target=self._supervise_process, name="ProcessSupervisor", daemon=True
-        )
-        process_thread.start()
-        print(f"Started thread eBPFProcessSupervisor with ID {process_thread.ident}")
-        self.threads.append(process_thread)
-
-        self.event_dispatcher = EventDispatcher(self)
-        self.log_collector_manager = LogCollectorManager(self)
         self._supervise_thread("EventDispatcher", self.event_dispatcher.run)
-        self._supervise_thread("AnomalyWatcher", AnomalyWatcher(self).run)
+        self._supervise_thread("AnomalyWatcher", self.anomaly_watcher.run)
         self._supervise_thread("LogCollector", self.log_collector_manager.run)
-        self._supervise_thread("LogCompressor", LogCompressor(self).run)
-        self._supervise_thread("AuditLogger", AuditLogger(self).run)
-        self._supervise_thread("SpaceWatcher", SpaceWatcher(self).run)
+        self._supervise_thread("LogCompressor", self.log_compressor.run)
+        self._supervise_thread("AuditLogger", self.audit_logger.run)
+        self._supervise_thread("SpaceWatcher", self.space_watcher.run)
         self.stop_event.wait()
         self._shutdown()
 
 
 def main():
+    """Main entry point for the AODv2 controller daemon."""
 
     # Check if script is running as root
     if os.geteuid() != 0:
@@ -160,8 +188,6 @@ def main():
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:
-        import traceback
-
-        print("Fatal error in main():")
+    except Exception as e:  # pylint: disable=broad-except
+        print("Fatal error in main():", e)
         traceback.print_exc()
