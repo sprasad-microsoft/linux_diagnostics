@@ -34,12 +34,13 @@ class Controller:
         self.anomalyActionQueue = queue.Queue()
         self.archiveQueue = queue.Queue()
         self.auditQueue = queue.Queue()
-        self.processes = {}
+        self.tool_processes = {}
         self.tool_starters = {
             "smbslower": self.start_smbsloweraod,
             # "smbiosnoop": self.start_smbiosnoop,
         }
 
+        # Initialize all components
         self.event_dispatcher = EventDispatcher(self)
         self.log_collector_manager = LogCollectorManager(self)
         self.log_compressor = LogCompressor(self)
@@ -47,7 +48,7 @@ class Controller:
         self.space_watcher = SpaceWatcher(self)
         self.anomaly_watcher = AnomalyWatcher(self)
 
-    def _supervise_thread(self, name: str, target: callable, *args, **kwargs) -> None:
+    def _supervise_thread(self, thread_name: str, target: callable, *args, **kwargs) -> None:
         """Start and supervise a thread, restarting it if it dies unexpectedly."""
 
         def runner():
@@ -55,47 +56,45 @@ class Controller:
                 try:
                     target(*args, **kwargs)
                 except Exception:  # pylint: disable=broad-except
-                    print(f"{name} died: {traceback.format_exc()}")
+                    print(f"{thread_name} died: {traceback.format_exc()}")
                     time.sleep(1)  # Wait before restarting
 
-        t = threading.Thread(target=runner, name=name, daemon=True)
+        t = threading.Thread(target=runner, name=thread_name, daemon=True)
         t.start()
-        print(f"Started thread {name} with ID {t.ident}")
+        print(f"Started thread {thread_name} with ID {t.ident}")
         self.threads.append(t)
 
-    def _supervise_process(self, name: str, start_func: callable) -> None:
+    def _supervise_process(self, process_name: str, start_func: callable) -> None:
         """Supervise a process, restarting it if it exits unexpectedly."""
         while not self.stop_event.is_set():
             process = start_func()
-            self.processes[name] = process
-            print(f"Started {name} process with PID {process.pid}")
+            self.tool_processes[process_name] = process
+            print(f"Started {process_name} process with PID {process.pid}")
             while True:
                 if self.stop_event.wait(timeout=1):
                     break
                 if process.poll() is not None:
                     print(
-                        f"{name} process exited unexpectedly with code {process.returncode}, restarting..."
+                        f"{process_name} process exited unexpectedly with code {process.returncode}, restarting..."
                     )
                     break
             if self.stop_event.is_set():
                 try:
                     os.killpg(os.getpgid(process.pid), signal.SIGINT)
                     process.wait(timeout=5)
-                    print(f"{name} process stopped gracefully")
+                    print(f"{process_name} process stopped gracefully")
                 except Exception:  # pylint: disable=broad-except
-                    print(f"{name} process did not stop gracefully")
+                    print(f"{process_name} process did not stop gracefully")
                 break
             time.sleep(1)
 
     def _get_smbsloweraod_args(self):
         """Get arguments for the smbsloweraod process based on the latency anomaly config."""
-
         latency_anomaly = self.config.guardian.anomalies.get("latency")
         if latency_anomaly is None:
             return 10, list(ALL_SMB_CMDS.values())  # Default threshold is 10
 
-        thresholds = [threshold for threshold in latency_anomaly.track.values()]
-        min_threshold = min(thresholds)
+        min_threshold = min(list(latency_anomaly.track.values()))
 
         # track_cmds: list of all SMB commands we want to track, as numbers, comma-separated
         smbcmds = [str(ALL_SMB_CMDS[cmd]) for cmd, threshold in latency_anomaly.track.items()]
