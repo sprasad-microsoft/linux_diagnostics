@@ -31,7 +31,7 @@ class EventDispatcher:
         self.head_tail_fmt = "<Q" if HEAD_TAIL_BYTES == 8 else "<I"
         self.shm_fd, self.shm_map = self._setup_shared_memory()
 
-    def _setup_shared_memory(self):
+    def _setup_shared_memory(self) -> tuple[int, mmap.mmap]:
         """
         Open, create, size, and memory-map the shared memory segment.
 
@@ -68,7 +68,7 @@ class EventDispatcher:
 
         return shm_fd, shm_map
 
-    def run(self):
+    def run(self) -> None:
         """Loop: poll eventQueue, detect anomalies, and put actions into anomalyActionQueue"""
         print("EventDispatcher started running")
         events_buffer = np.empty(0, dtype=event_dtype)
@@ -105,30 +105,30 @@ class EventDispatcher:
             tail = (tail + available_bytes) % SHM_DATA_SIZE
             self._update_tail(tail)
             return raw
-        else:
-            # Wrap-around case
-            available_bytes = (SHM_DATA_SIZE - tail) + head
-            bytes_to_end = SHM_DATA_SIZE - tail
-            self.shm_map.seek(2 * HEAD_TAIL_BYTES + tail)
-            raw1 = self.shm_map.read(bytes_to_end)
-            self.shm_map.seek(2 * HEAD_TAIL_BYTES)
-            raw2 = self.shm_map.read(head)
-            tail = (tail + available_bytes) % SHM_DATA_SIZE
-            self._update_tail(tail)
-            return raw1 + raw2
 
-    def _update_tail(self, tail):
+        # Wrap-around case
+        available_bytes = (SHM_DATA_SIZE - tail) + head
+        bytes_to_end = SHM_DATA_SIZE - tail
+        self.shm_map.seek(2 * HEAD_TAIL_BYTES + tail)
+        raw1 = self.shm_map.read(bytes_to_end)
+        self.shm_map.seek(2 * HEAD_TAIL_BYTES)
+        raw2 = self.shm_map.read(head)
+        tail = (tail + available_bytes) % SHM_DATA_SIZE
+        self._update_tail(tail)
+        return raw1 + raw2
+
+    def _update_tail(self, tail) -> None:
         self.shm_map.seek(HEAD_TAIL_BYTES)
         self.shm_map.write(struct.pack(self.head_tail_fmt, tail))
         self.shm_map.flush()
 
-    def _parse(self, raw: bytes):
+    def _parse(self, raw: bytes) -> np.ndarray | None:
         """Convert raw struct bytes to a numpy array of events (batch)."""
         if not raw:
             return None
         return np.frombuffer(raw, dtype=event_dtype)
 
-    def cleanup(self):
+    def cleanup(self) -> None:
         """Clean up resources used by the EventDispatcher."""
         try:
             # Read head and tail before closing mmap

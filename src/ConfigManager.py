@@ -2,11 +2,12 @@ from shared_data import *
 import yaml
 import warnings
 
+
 class ConfigManager:
 
     def __init__(self, config_path: str):
         try:
-            with open(config_path, 'r') as file:
+            with open(config_path, "r") as file:
                 config_data = yaml.safe_load(file)
         except FileNotFoundError:
             raise RuntimeError(f"Config file not found: {config_path}")
@@ -19,7 +20,7 @@ class ConfigManager:
         # Parse guardian anomalies
         anomalies = {}
         for name, anomaly in config_data["guardian"]["anomalies"].items():
-            
+
             # depending on the type of anomaly, i want to call different functions
             if anomaly["type"] == "Latency":
                 track = self.get_latency_track_cmds(anomaly)
@@ -29,8 +30,9 @@ class ConfigManager:
             print(f"track: {track}")
             # Check if track is empty after all logic
             if not track or (isinstance(track, dict) and len(track) == 0):
-                raise ValueError(f"No items to track for anomaly '{name}' after applying config logic.")
-
+                raise ValueError(
+                    f"No items to track for anomaly '{name}' after applying config logic."
+                )
 
             anomalies[name] = AnomalyConfig(
                 type=anomaly["type"],
@@ -38,7 +40,7 @@ class ConfigManager:
                 acceptable_percentage=anomaly["acceptable_percentage"],
                 default_threshold_ms=anomaly.get("default_threshold_ms"),
                 track=track,
-                actions=anomaly.get("actions", [])
+                actions=anomaly.get("actions", []),
             )
         guardian = GuardianConfig(anomalies=anomalies)
 
@@ -49,12 +51,12 @@ class ConfigManager:
             watcher=watcher,
             guardian=guardian,
             cleanup=config_data["cleanup"],
-            audit=config_data["audit"]
+            audit=config_data["audit"],
         )
 
     def validate_cmds(self, all_codes, track_codes, exclude_codes):
-        
-        #check if any track_codes are duplicated
+
+        # check if any track_codes are duplicated
         present_track_codes = set()
         for code in track_codes:
             if code not in all_codes:
@@ -62,8 +64,8 @@ class ConfigManager:
             if code in present_track_codes:
                 warnings.warn(f"Code {code} is duplicated in track codes.", UserWarning)
             present_track_codes.add(code)
-        
-        #check if any exclude_codes are duplicated
+
+        # check if any exclude_codes are duplicated
         present_exclude_codes = set()
         for code in exclude_codes:
             if code not in all_codes:
@@ -71,11 +73,13 @@ class ConfigManager:
             if code in present_exclude_codes:
                 warnings.warn(f"Code {code} is duplicated in exclude codes.", UserWarning)
             present_exclude_codes.add(code)
-        
-        #check if any track_codes are in exclude_codes
+
+        # check if any track_codes are in exclude_codes
         for code in track_codes:
             if code in exclude_codes:
-                raise ValueError(f"Code {code} is duplicated in track and exclude codes. It is unclear if Code {code} should be tracked or excluded.")
+                raise ValueError(
+                    f"Code {code} is duplicated in track and exclude codes. It is unclear if Code {code} should be tracked or excluded."
+                )
 
     def validate_smb_commands(self, track_commands, exclude_commands):
 
@@ -91,7 +95,7 @@ class ConfigManager:
         present_track_cmds = 0
         present_exclude_cmds = 0
 
-        #Checks for duplicate track commands
+        # Checks for duplicate track commands
         for command in track_commands:
             if "command" not in command:
                 raise ValueError(f"Missing 'command' key in TrackCommands: {command}")
@@ -99,24 +103,31 @@ class ConfigManager:
                 cmd = command["command"]
                 if cmd in ALL_SMB_CMDS:
                     if present_track_cmds & (1 << ALL_SMB_CMDS[cmd]):
-                        warnings.warn(f"Command {cmd} is duplicated in track commands.", UserWarning)
+                        warnings.warn(
+                            f"Command {cmd} is duplicated in track commands.", UserWarning
+                        )
                         continue
-                    if "threshold" in command and (not isinstance(command["threshold"], (int, float)) or command["threshold"] < 0):
+                    if "threshold" in command and (
+                        not isinstance(command["threshold"], (int, float))
+                        or command["threshold"] < 0
+                    ):
                         raise ValueError(f"Invalid threshold value in track command: {command}")
-                    present_track_cmds |= (1 << ALL_SMB_CMDS[cmd])
+                    present_track_cmds |= 1 << ALL_SMB_CMDS[cmd]
                 else:
                     raise ValueError(f"Command {cmd} not found in ALL_SMB_CMDS.")
             except (TypeError, KeyError):
                 raise ValueError(f"Invalid track command format: {command}")
-            
-        #Check for duplicate exclude commands
+
+        # Check for duplicate exclude commands
         for cmd in exclude_commands:
             try:
                 if cmd in ALL_SMB_CMDS:
                     if present_exclude_cmds & (1 << ALL_SMB_CMDS[cmd]):
-                        warnings.warn(f"Command {cmd} is duplicated in exclude commands.", UserWarning)
-                        continue 
-                    present_exclude_cmds |= (1 << ALL_SMB_CMDS[cmd])
+                        warnings.warn(
+                            f"Command {cmd} is duplicated in exclude commands.", UserWarning
+                        )
+                        continue
+                    present_exclude_cmds |= 1 << ALL_SMB_CMDS[cmd]
                 else:
                     raise ValueError(f"Command {cmd} not found in ALL_SMB_CMDS.")
             except (TypeError, KeyError):
@@ -128,7 +139,9 @@ class ConfigManager:
                 cmd = command
                 if cmd in ALL_SMB_CMDS:
                     if present_track_cmds & (1 << ALL_SMB_CMDS[cmd]):
-                        raise ValueError(f"Command {cmd} is duplicated in track or exclude commands. It is unclear if Command {cmd} should be tracked or excluded.")
+                        raise ValueError(
+                            f"Command {cmd} is duplicated in track or exclude commands. It is unclear if Command {cmd} should be tracked or excluded."
+                        )
                 else:
                     raise ValueError(f"Command {cmd} not found in ALL_SMB_CMDS.")
             except (TypeError, KeyError):
@@ -182,14 +195,14 @@ class ConfigManager:
                 command = cmd["command"]
                 threshold = cmd.get("threshold", default_threshold)
                 command_map[command] = threshold
-            for cmd in exclude_commands: #delete if it is over here
+            for cmd in exclude_commands:  # delete if it is over here
                 if cmd in command_map:
                     del command_map[cmd]
 
         return command_map
 
     def get_error_track_cmds(self, anomaly):
-        
+
         track_codes = anomaly.get("track_codes", [])
         exclude_codes = anomaly.get("exclude_codes", [])
         error_mode = anomaly.get("mode", "all")
@@ -204,5 +217,5 @@ class ConfigManager:
 
         # Validate track and exclude codes
         self.validate_cmds(error_codes, track_codes, exclude_codes)
-        
+
         return self.get_track_codes(error_mode, error_codes, track_codes, exclude_codes)

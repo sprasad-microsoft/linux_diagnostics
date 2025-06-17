@@ -1,5 +1,6 @@
 import queue
 
+
 class AuditLogger:
     def __init__(self, controller):
         self.controller = controller

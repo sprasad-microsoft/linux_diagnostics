@@ -20,7 +20,7 @@ class LogCompressor:
                 self.controller.archiveQueue.task_done()
             except queue.Empty:
                 continue
-    
+
     def _compress(self, output_subdir):
         archive_path = output_subdir.rstrip(os.sep) + ".tar.gz"
         with tarfile.open(archive_path, "w:gz") as tar:

@@ -88,7 +88,7 @@ class Controller:
                 break
             time.sleep(1)
 
-    def _get_smbsloweraod_args(self):
+    def _get_smbsloweraod_args(self) -> tuple[int, str]:
         """Get arguments for the smbsloweraod process based on the latency anomaly config."""
         latency_anomaly = self.config.guardian.anomalies.get("latency")
         if latency_anomaly is None:
@@ -126,7 +126,7 @@ class Controller:
         if hasattr(self, "log_collector_manager"):
             self.log_collector_manager.stop()
 
-    def _extract_tools(self) -> None:
+    def _extract_tools(self) -> set[str]:
         """Extract the set of ebpf tools to run from the config."""
         tool_names = set()
         for anomaly in self.config.guardian.anomalies.values():

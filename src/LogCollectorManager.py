@@ -11,6 +11,7 @@ from abc import ABC, abstractmethod
 PDEATHSIG_WRAPPER = os.path.join(os.path.dirname(__file__), "pdeathsig_wrapper.py")
 TOOL_SHUTDOWN_SLEEP_SEC = 10
 
+
 class QuickAction(ABC):
     def __init__(self, params: dict):
         self.params = params
@@ -21,29 +22,43 @@ class QuickAction(ABC):
     def execute(self, batch_id: str) -> None:
         """Execute the (quick) log collection."""
 
+
 class JournalctlQuickAction(QuickAction):
     def execute(self, batch_id: str):
         output_path = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", "journalctl.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        print(f"[Log Collector][journalctl] Collecting journalctl logs for batch {batch_id} at {output_path}")
+        print(
+            f"[Log Collector][journalctl] Collecting journalctl logs for batch {batch_id} at {output_path}"
+        )
         with open(output_path, "w") as f:
             subprocess.run(
-                ["python3", PDEATHSIG_WRAPPER, "journalctl", "--since", f"{self.anomaly_interval} seconds ago"],
-                stdout=f
+                [
+                    "python3",
+                    PDEATHSIG_WRAPPER,
+                    "journalctl",
+                    "--since",
+                    f"{self.anomaly_interval} seconds ago",
+                ],
+                stdout=f,
             )
-        print(f"[Log Collector][journalctl] Finished writing journalctl logs for batch {batch_id} at {output_path}")
+        print(
+            f"[Log Collector][journalctl] Finished writing journalctl logs for batch {batch_id} at {output_path}"
+        )
+
 
 class CifsstatsQuickAction(QuickAction):
     def execute(self, batch_id: str) -> None:
         output_path = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", "cifsstats.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        print(f"[Log Collector][cifsstats] Collecting cifsstats logs for batch {batch_id} at {output_path}")
+        print(
+            f"[Log Collector][cifsstats] Collecting cifsstats logs for batch {batch_id} at {output_path}"
+        )
         with open(output_path, "w") as f:
-            subprocess.run(
-                ["python3", PDEATHSIG_WRAPPER, "cat", "/proc/fs/cifs/Stats"],
-                stdout=f
-            )
-        print(f"[Log Collector][cifsstats] Finished writing cifsstats logs for batch {batch_id} at {output_path}")
+            subprocess.run(["python3", PDEATHSIG_WRAPPER, "cat", "/proc/fs/cifs/Stats"], stdout=f)
+        print(
+            f"[Log Collector][cifsstats] Finished writing cifsstats logs for batch {batch_id} at {output_path}"
+        )
+
 
 class DmesgQuickAction(QuickAction):
     def execute(self, batch_id: str):
@@ -52,34 +67,56 @@ class DmesgQuickAction(QuickAction):
         print(f"[Log Collector][dmesg] Collecting dmesg logs for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
             subprocess.run(
-                ["python3", PDEATHSIG_WRAPPER, "journalctl", "-k", "--since", f"{self.anomaly_interval} seconds ago"],  # -k does what --dmesg does in newer systems and -k has better compatibility itseems
-                stdout=f
+                [
+                    "python3",
+                    PDEATHSIG_WRAPPER,
+                    "journalctl",
+                    "-k",
+                    "--since",
+                    f"{self.anomaly_interval} seconds ago",
+                ],  # -k does what --dmesg does in newer systems and -k has better compatibility itseems
+                stdout=f,
             )
-        print(f"[Log Collector][dmesg] Finished writing dmesg logs for batch {batch_id} at {output_path}")
+        print(
+            f"[Log Collector][dmesg] Finished writing dmesg logs for batch {batch_id} at {output_path}"
+        )
+
 
 class DebugDataQuickAction(QuickAction):
     def execute(self, batch_id: str):
         output_path = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", "Debugdata.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        print(f"[Log Collector][debugdata] Collecting debug data for batch {batch_id} at {output_path}")
+        print(
+            f"[Log Collector][debugdata] Collecting debug data for batch {batch_id} at {output_path}"
+        )
         with open(output_path, "w") as f:
             subprocess.run(
-                ["python3", PDEATHSIG_WRAPPER, "cat", "/proc/fs/cifs/DebugData"],  # Replace with actual debug data command
-                stdout=f
+                [
+                    "python3",
+                    PDEATHSIG_WRAPPER,
+                    "cat",
+                    "/proc/fs/cifs/DebugData",
+                ],  # Replace with actual debug data command
+                stdout=f,
             )
-        print(f"[Log Collector][debugdata] Finished writing debug data for batch {batch_id} at {output_path}")
+        print(
+            f"[Log Collector][debugdata] Finished writing debug data for batch {batch_id} at {output_path}"
+        )
+
 
 class MountsQuickAction(QuickAction):
     def execute(self, batch_id: str):
         output_path = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", "mounts.log")
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
-        print(f"[Log Collector][mounts] Collecting /proc/mounts for batch {batch_id} at {output_path}")
+        print(
+            f"[Log Collector][mounts] Collecting /proc/mounts for batch {batch_id} at {output_path}"
+        )
         with open(output_path, "w") as f:
-            subprocess.run(
-                ["python3", PDEATHSIG_WRAPPER, "cat", "/proc/mounts"],
-                stdout=f
-            )
-        print(f"[Log Collector][mounts] Finished writing mounts logs for batch {batch_id} at {output_path}")
+            subprocess.run(["python3", PDEATHSIG_WRAPPER, "cat", "/proc/mounts"], stdout=f)
+        print(
+            f"[Log Collector][mounts] Finished writing mounts logs for batch {batch_id} at {output_path}"
+        )
+
 
 class SmbinfoQuickAction(QuickAction):
     def execute(self, batch_id: str):
@@ -88,10 +125,19 @@ class SmbinfoQuickAction(QuickAction):
         print(f"[Log Collector][smbinfo] Collecting smbinfo for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
             subprocess.run(
-                ["python3", PDEATHSIG_WRAPPER, "smbinfo", "-h", "filebasicinfo"],  # Replace with actual smbinfo command if needed, also i dont think there is any option to collect 1s ago stuff only
-                stdout=f
+                [
+                    "python3",
+                    PDEATHSIG_WRAPPER,
+                    "smbinfo",
+                    "-h",
+                    "filebasicinfo",
+                ],  # Replace with actual smbinfo command if needed, also i dont think there is any option to collect 1s ago stuff only
+                stdout=f,
             )
-        print(f"[Log Collector][smbinfo] Finished writing smbinfo logs for batch {batch_id} at {output_path}")
+        print(
+            f"[Log Collector][smbinfo] Finished writing smbinfo logs for batch {batch_id} at {output_path}"
+        )
+
 
 class SysLogsQuickAction(QuickAction):
     def execute(self, batch_id: str):
@@ -100,13 +146,28 @@ class SysLogsQuickAction(QuickAction):
         print(f"[Log Collector][syslogs] Collecting syslogs for batch {batch_id} at {output_path}")
         with open(output_path, "w") as f:
             subprocess.run(
-                ["python3", PDEATHSIG_WRAPPER, "cat", "/var/log/syslog"],  # Adjust path as needed, this is for Debian/Ubuntu
-                stdout=f
+                [
+                    "python3",
+                    PDEATHSIG_WRAPPER,
+                    "cat",
+                    "/var/log/syslog",
+                ],  # Adjust path as needed, this is for Debian/Ubuntu
+                stdout=f,
             )
-        print(f"[Log Collector][syslogs] Finished writing syslogs for batch {batch_id} at {output_path}")
+        print(
+            f"[Log Collector][syslogs] Finished writing syslogs for batch {batch_id} at {output_path}"
+        )
+
 
 class ToolManager(ABC):
-    def __init__(self, controller, batches_root, output_subdir: str = "live/tool", base_duration: int = 20, max_duration: int = 60):
+    def __init__(
+        self,
+        controller,
+        batches_root,
+        output_subdir: str = "live/tool",
+        base_duration: int = 20,
+        max_duration: int = 60,
+    ):
         self.controller = controller
         self.batches_root = batches_root
         self.base_duration = base_duration
@@ -136,9 +197,11 @@ class ToolManager(ABC):
                     self.in_cooldown = False
                 else:
                     # Still in cooldown
-                    print(f"[Log Collector][{self.tool_name()}] In cooldown period, rejecting batch {batch_id}")
+                    print(
+                        f"[Log Collector][{self.tool_name()}] In cooldown period, rejecting batch {batch_id}"
+                    )
                     return
-        
+
         if self._can_extend(batch_id):
             with self.lock:
                 if self.proc is None:
@@ -146,12 +209,13 @@ class ToolManager(ABC):
                 else:  # create symlink
                     if self.end_time - time.time() < 10:
                         self.end_time += self.base_duration
-                    print(f"[Log Collector][{self.tool_name()}] Extending for batch {batch_id} end time by {self.base_duration} seconds")
+                    print(
+                        f"[Log Collector][{self.tool_name()}] Extending for batch {batch_id} end time by {self.base_duration} seconds"
+                    )
                     self._create_symlink_to_running_batch(batch_id)
-        
+
     @abstractmethod
-    def _build_command(self, batch_id: str) -> list:
-        ...
+    def _build_command(self, batch_id: str) -> list: ...
 
     def _start(self, batch_id: str) -> None:
         output_path = os.path.join(self.batches_root, f"aod_{batch_id}", self.output_subdir)
@@ -160,15 +224,19 @@ class ToolManager(ABC):
         open(in_progress, "w").close()
         cmd = self._build_command(batch_id)
         cmd = ["python3", PDEATHSIG_WRAPPER] + cmd
-        #VVVIMP use shld set end time before running the thread bcos monitor might check with endtime 0 and stop the process
+        # VVVIMP use shld set end time before running the thread bcos monitor might check with endtime 0 and stop the process
         self.end_time = time.time() + self.base_duration
         self.max_end_time = time.time() + self.max_duration
-        print(f"[Log Collector][{self.tool_name()}] Launching process for batch {batch_id}: {' '.join(cmd)}")
+        print(
+            f"[Log Collector][{self.tool_name()}] Launching process for batch {batch_id}: {' '.join(cmd)}"
+        )
         try:
             # Capture stderr for debugging
             self.proc = subprocess.Popen(cmd, stderr=subprocess.PIPE, preexec_fn=os.setsid)
         except Exception as e:
-            print(f"[Log Collector][{self.tool_name()}] Failed to start process for batch {batch_id}: {e}")
+            print(
+                f"[Log Collector][{self.tool_name()}] Failed to start process for batch {batch_id}: {e}"
+            )
             self._finalize(batch_id)
             return
         self.thread = threading.Thread(target=self._monitor, args=(batch_id,), daemon=True)
@@ -178,7 +246,9 @@ class ToolManager(ABC):
     def _create_symlink_to_running_batch(self, batch_id: str):
         """Create a symlink in the current batch's output dir pointing to the running batch's output dir."""
         if self.running_batch_id is None or self.running_batch_id == batch_id:
-            print(f"[Log Collector][{self.tool_name()}] No other running batch to symlink for batch {batch_id}")
+            print(
+                f"[Log Collector][{self.tool_name()}] No other running batch to symlink for batch {batch_id}"
+            )
             return
         src = os.path.join(self.batches_root, f"aod_{self.running_batch_id}", self.output_subdir)
         dst = os.path.join(self.batches_root, f"aod_{batch_id}", self.output_subdir)
@@ -189,13 +259,15 @@ class ToolManager(ABC):
             os.symlink(src, dst)
             print(f"[Log Collector][{self.tool_name()}] Created symlink from {dst} to {src}")
         except Exception as e:
-            print(f"[Log Collector][{self.tool_name()}] Failed to create symlink: {e}")        
+            print(f"[Log Collector][{self.tool_name()}] Failed to create symlink: {e}")
 
     def _monitor(self, batch_id: str) -> None:
         print(f"[Log Collector][{self.tool_name()}] Monitoring batch {batch_id}")
         while time.time() < self.end_time:
             if self.stop_event.is_set():
-                print(f"[Log Collector][{self.tool_name()}] Stop event set, terminating monitor for batch {batch_id}")
+                print(
+                    f"[Log Collector][{self.tool_name()}] Stop event set, terminating monitor for batch {batch_id}"
+                )
                 return
             time.sleep(20)
         print(f"[Log Collector][{self.tool_name()}] Tring Tring! Time up")
@@ -226,11 +298,15 @@ class ToolManager(ABC):
             print(f"[Log Collector][{self.tool_name()}] Renamed {in_progress} to {complete}")
         self.controller.archiveQueue.put(self.output_subdir)
         print(f"[Log Collector][{self.tool_name()}] Added batch {batch_id} to archive queue")
-        print(f"[Log Collector][{self.tool_name()}] Finished writing logs for batch {batch_id} in {output_path}")
+        print(
+            f"[Log Collector][{self.tool_name()}] Finished writing logs for batch {batch_id} in {output_path}"
+        )
         with self.lock:
             self.in_cooldown = True
             self.cooldown_end_time = time.time() + TOOL_SHUTDOWN_SLEEP_SEC
-            print(f"[Log Collector][{self.tool_name()}] Entered cooldown period for {TOOL_SHUTDOWN_SLEEP_SEC} seconds after batch {batch_id}")
+            print(
+                f"[Log Collector][{self.tool_name()}] Entered cooldown period for {TOOL_SHUTDOWN_SLEEP_SEC} seconds after batch {batch_id}"
+            )
 
     def stop_all(self) -> None:
         print(f"[Log Collector][{self.tool_name()}] Stopping all batches")
@@ -239,7 +315,7 @@ class ToolManager(ABC):
             self._terminate_proc()
             self.in_cooldown = False
 
-    #doesnt need batch_id param, only for logging i kept it
+    # doesnt need batch_id param, only for logging i kept it
     def _can_extend(self, batch_id: str) -> bool:
         """Check CPU and if extending would stay within max duration."""
         for _ in range(3):
@@ -248,8 +324,17 @@ class ToolManager(ABC):
                 break
             time.sleep(1)
         else:
-            subprocess.run(["logger", "-p", "user.warning", f"Not enough CPU to start {self.__class__.__name__}"])
-            print(f"[Log Collector][{self.tool_name()}] Not enough CPU to start or extend batch {batch_id}")
+            subprocess.run(
+                [
+                    "logger",
+                    "-p",
+                    "user.warning",
+                    f"Not enough CPU to start {self.__class__.__name__}",
+                ]
+            )
+            print(
+                f"[Log Collector][{self.tool_name()}] Not enough CPU to start or extend batch {batch_id}"
+            )
             return False
 
         if self.proc is None:  # new process
@@ -257,44 +342,84 @@ class ToolManager(ABC):
         proposed_end = self.end_time + self.base_duration
         if proposed_end <= self.max_end_time:
             return True
-        print(f"[Log Collector][{self.tool_name()}] Cannot extend batch {batch_id}: would exceed max duration")
+        print(
+            f"[Log Collector][{self.tool_name()}] Cannot extend batch {batch_id}: would exceed max duration"
+        )
         return False
 
+
 class TcpdumpManager(ToolManager):
-    def __init__(self, controller, batches_root: str, output_subdir: str = "live/tcpdump", base_duration: int = 20, max_duration: int = 90):
+    def __init__(
+        self,
+        controller,
+        batches_root: str,
+        output_subdir: str = "live/tcpdump",
+        base_duration: int = 20,
+        max_duration: int = 90,
+    ):
         super().__init__(controller, batches_root, output_subdir, base_duration, max_duration)
 
     def _build_command(self, batch_id: str) -> list:
-        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", self.output_subdir, "tcpdump.pcap")
+        output_path = os.path.join(
+            self.batches_root, f"aod_{batch_id}", self.output_subdir, "tcpdump.pcap"
+        )
         os.makedirs(os.path.dirname(output_path), exist_ok=True)
         return [
             "tcpdump",
-            "-i", "eth0", #choose whichever interface you want
-            "tcp", "port", "445",  # SMB port
-            "-w", output_path
+            "-i",
+            "eth0",  # choose whichever interface you want
+            "tcp",
+            "port",
+            "445",  # SMB port
+            "-w",
+            output_path,
         ]
 
+
 class TraceCmdManager(ToolManager):
-    def __init__(self, controller, batches_root: str, output_subdir: str = "live/trace", base_duration: int = 20, max_duration: int = 90):
+    def __init__(
+        self,
+        controller,
+        batches_root: str,
+        output_subdir: str = "live/trace",
+        base_duration: int = 20,
+        max_duration: int = 90,
+    ):
         super().__init__(controller, batches_root, output_subdir, base_duration, max_duration)
 
     def _build_command(self, batch_id: str) -> list:
-        output_path = os.path.join(self.batches_root, f"aod_{batch_id}", self.output_subdir, "trace.dat")
+        output_path = os.path.join(
+            self.batches_root, f"aod_{batch_id}", self.output_subdir, "trace.dat"
+        )
         return [
-            "trace-cmd", "record",
-            "-e", "sched_switch",
-            "-e", "sched_wakeup",
-            "-e", "sched_wakeup_new",
-            "-e", "sched_process_exit",
-            "-e", "block_rq_issue",
-            "-e", "block_rq_complete",
-            "-e", "block_rq_insert",
-            "-e", "net_dev_queue",
-            "-e", "netif_receive_skb",
-            "-e", "net_dev_xmit",
-            "-e", "net_dev_start_xmit",
-            "-o", output_path
+            "trace-cmd",
+            "record",
+            "-e",
+            "sched_switch",
+            "-e",
+            "sched_wakeup",
+            "-e",
+            "sched_wakeup_new",
+            "-e",
+            "sched_process_exit",
+            "-e",
+            "block_rq_issue",
+            "-e",
+            "block_rq_complete",
+            "-e",
+            "block_rq_insert",
+            "-e",
+            "net_dev_queue",
+            "-e",
+            "netif_receive_skb",
+            "-e",
+            "net_dev_xmit",
+            "-e",
+            "net_dev_start_xmit",
+            "-o",
+            output_path,
         ]
+
 
 class LogCollectorManager:
     def __init__(self, controller):
@@ -305,7 +430,7 @@ class LogCollectorManager:
         self.quick_actions_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
         self.tcpdump_manager = TcpdumpManager(controller, self.batches_root, "live/tcpdump", 20, 90)
         self.trace_manager = TraceCmdManager(controller, self.batches_root, "live/trace", 20, 90)
-        self.params = { "batches_root": self.batches_root, "anomaly_interval": self.anomaly_interval }
+        self.params = {"batches_root": self.batches_root, "anomaly_interval": self.anomaly_interval}
         self.action_factory = {
             "journalctl": lambda: JournalctlQuickAction(self.params),
             "cifsstats": lambda: CifsstatsQuickAction(self.params),
@@ -315,17 +440,14 @@ class LogCollectorManager:
             "debugdata": lambda: DebugDataQuickAction(self.params),
             "mounts": lambda: MountsQuickAction(self.params),
             "smbinfo": lambda: SmbinfoQuickAction(self.params),
-            "syslogs": lambda: SysLogsQuickAction(self.params)
+            "syslogs": lambda: SysLogsQuickAction(self.params),
         }
         self.anomaly_actions = self.set_anomaly_actions()
 
     def set_anomaly_actions(self):
         # change code to parse config file to fill these details later
         all_actions = [factory() for factory in self.action_factory.values()]
-        return {
-            "latency": all_actions,
-            "error": all_actions
-        }
+        return {"latency": all_actions, "error": all_actions}
 
     def _ensure_batch_dir(self, evt) -> str:
         batch_id = str(evt.get("batch_id", evt.get("timestamp", int(time.time()))))
@@ -356,21 +478,27 @@ class LogCollectorManager:
             any_quick_action = False
             quick_actions = []
 
-            print(f"[Log Collector][manager] Handling anomaly type '{anomaly_type}' for batch {batch_id}")
+            print(
+                f"[Log Collector][manager] Handling anomaly type '{anomaly_type}' for batch {batch_id}"
+            )
             for action in self.anomaly_actions.get(anomaly_type, []):
                 if isinstance(action, ToolManager):
-                    print(f"[Log Collector][manager] Extending tool manager for {action.output_subdir} batch {batch_id}")
+                    print(
+                        f"[Log Collector][manager] Extending tool manager for {action.output_subdir} batch {batch_id}"
+                    )
                     action.extend(batch_id)
                 else:
                     if not any_quick_action:
-                        #create the in progress marker
+                        # create the in progress marker
                         quick_dir = os.path.join(self.batches_root, f"aod_{batch_id}", "quick")
                         os.makedirs(quick_dir, exist_ok=True)
                         in_progress = os.path.join(quick_dir, ".IN_PROGRESS")
                         open(in_progress, "w").close()
                         any_quick_action = True
                         quick_actions = []
-                    print(f"[Log Collector][manager] Submitting quick action {action.__class__.__name__} for batch {batch_id}")
+                    print(
+                        f"[Log Collector][manager] Submitting quick action {action.__class__.__name__} for batch {batch_id}"
+                    )
                     quick_actions.append(self.quick_actions_pool.submit(action.execute, batch_id))
             if any_quick_action:
                 concurrent.futures.wait(quick_actions, return_when=concurrent.futures.ALL_COMPLETED)
@@ -378,7 +506,9 @@ class LogCollectorManager:
                 if os.path.exists(in_progress):
                     os.rename(in_progress, completed)
                     print(f"[Log Collector][manager] Renamed {in_progress} to {completed}")
-                print(f"[Log Collector][manager] Adding quick actions for batch {batch_id} to archive queue")
+                print(
+                    f"[Log Collector][manager] Adding quick actions for batch {batch_id} to archive queue"
+                )
                 quick_output_dir = os.path.join(self.batches_root, f"aod_{batch_id}", "quick")
                 self.controller.archiveQueue.put(quick_output_dir)
                 any_quick_action = False
