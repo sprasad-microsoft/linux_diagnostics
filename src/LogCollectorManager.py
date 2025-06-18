@@ -467,6 +467,8 @@ class LogCollectorManager:
             try:
                 print("[Log Collector][manager] Waiting for events in anomalyActionQueue")
                 evt = self.controller.anomalyActionQueue.get()
+                if evt is None:
+                    break
             except queue.Empty:
                 continue
             batch_id = self._ensure_batch_dir(evt)

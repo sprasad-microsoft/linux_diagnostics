@@ -141,6 +141,8 @@ class EventDispatcher:
 
     def cleanup(self) -> None:
         """Clean up resources used by the EventDispatcher."""
+        
+        # Shared memory cleanup
         try:
             # Read head and tail before closing mmap
             self.shm_map.seek(0)
@@ -157,3 +159,4 @@ class EventDispatcher:
             print("EventDispatcher: Shared memory cleaned up")
         except OSError as e:
             print(f"EventDispatcher: Error cleaning up shared memory: {e}")
+

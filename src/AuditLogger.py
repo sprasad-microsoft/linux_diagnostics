@@ -9,7 +9,9 @@ class AuditLogger:
         print("AuditLogger started running")
         while not self.controller.stop_event.is_set():
             try:
-                record = self.controller.auditQueue.get(timeout=1)
+                record = self.controller.auditQueue.get()
+                if record is None:
+                    break  # Exit loop on sentinel
                 print(f"Logged audit record: {record}")
                 self.controller.auditQueue.task_done()
             except queue.Empty:

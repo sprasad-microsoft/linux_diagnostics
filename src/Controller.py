@@ -117,11 +117,18 @@ class Controller:
 
     def _shutdown(self) -> None:
         """Shutdown all threads and components gracefully."""
+
+        # Unblock all queues to allow threads to exit
+        self.eventQueue.put(None)  # Sentinel to stop EventDispatcher
+        self.anomalyActionQueue.put(None)  # Sentinel to stop AnomalyWatcher
+        self.archiveQueue.put(None)  # Sentinel to stop LogCompressor
+        self.auditQueue.put(None)  # Sentinel to stop AuditLogger
+
         for thread in self.threads:
             thread.join(timeout=5)
             print(f"[Controller] Thread {thread.name} with ID {thread.ident} has been shut down")
         print("[Controller] Shutting down all components")
-        # Clean up shared memory via EventDispatcher
+
         if hasattr(self, "event_dispatcher"):
             self.event_dispatcher.cleanup()
         if hasattr(self, "log_collector_manager"):

@@ -7,7 +7,7 @@ import queue
 import time
 import numpy as np
 
-from shared_data import event_dtype, MAX_WAIT
+from shared_data import MAX_WAIT
 from utils.anomaly_type import AnomalyType, ANOMALY_TYPE_TO_TOOL_ID
 from handlers.latency_anomaly_handler import LatencyAnomalyHandler
 from handlers.error_anomaly_handler import ErrorAnomalyHandler
@@ -41,7 +41,7 @@ class AnomalyWatcher:
         for anomaly_name, anomaly_cfg in config.guardian.anomalies.items():
             try:
                 anomaly_type_enum = AnomalyType(anomaly_cfg.type.strip().lower())
-            except ValueError as exc:
+            except ValueError:
                 print(
                     f"[AnomalyWatcher] Warning: Unknown anomaly type '{anomaly_cfg.type}' for '{anomaly_name}'"
                 )
@@ -59,26 +59,31 @@ class AnomalyWatcher:
     def run(self) -> None:
         """Loop: poll eventQueue, detect anomalies, and put actions into anomalyActionQueue"""
         while not self.controller.stop_event.is_set():
-            # wait for events in the queue
             batch = self.controller.eventQueue.get(True)
-            # wait for some time to accumulate more events
+            if batch is None:
+                self.controller.eventQueue.task_done()
+                break  # Exit loop on sentinel
+
             end_time = time.time() + MAX_WAIT
-            # collect a batch of events
             while time.time() < end_time:
                 try:
-                    batch = np.concatenate(
-                        (batch, self.controller.eventQueue.get_nowait())
-                    )
+                    next_batch = self.controller.eventQueue.get_nowait()
+                    if next_batch is None:
+                        self.controller.eventQueue.task_done()
+                        return  # Exit the run method immediately on sentinel
+                    batch = np.concatenate((batch, next_batch))
+                    self.controller.eventQueue.task_done()
                 except queue.Empty:
                     break
-            # process the batch of events
+
             for anomaly_type, handler in self.handlers.items():
                 tool_id = ANOMALY_TYPE_TO_TOOL_ID[anomaly_type]
-                masked_batch = batch[ batch["tool"] == tool_id]
+                masked_batch = batch[batch["tool"] == tool_id]
                 if handler.detect(masked_batch):
                     action = self._generate_action(anomaly_type)
                     self.controller.anomalyActionQueue.put(action)
 
+            self.controller.eventQueue.task_done()
             time.sleep(self.interval)
 
     def _generate_action(self, anomaly_type: AnomalyType) -> dict:
