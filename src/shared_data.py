@@ -20,6 +20,8 @@ PAGE_SIZE = 4096
 SHM_SIZE = (MAX_ENTRIES + 1) * PAGE_SIZE
 SHM_DATA_SIZE = SHM_SIZE // 10 - 2 * HEAD_TAIL_BYTES  # delete /10 later
 
+MAX_WAIT = 0.005 # 5 ms, used in event dispatcher and anomaly watcher
+
 ALL_SMB_CMDS = MappingProxyType(
     {
         "SMB2_NEGOTIATE": 0,
@@ -47,12 +49,14 @@ ALL_SMB_CMDS = MappingProxyType(
 
 ALL_ERROR_CODES = list(errno.errorcode.values())
 
+
 class Metrics(ctypes.Union):
     _fields_ = [("latency_ns", ctypes.c_ulonglong), ("retval", ctypes.c_int)]
 
 
 class Event(ctypes.Structure):
     """Event c struct"""
+
     _fields_ = [
         ("pid", ctypes.c_int),
         ("cmd_end_time_ns", ctypes.c_ulonglong),

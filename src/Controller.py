@@ -55,7 +55,7 @@ class Controller:
             while not self.stop_event.is_set():
                 try:
                     target(*args, **kwargs)
-                except Exception:  # pylint: disable=broad-except
+                except Exception:
                     print(f"{thread_name} died: {traceback.format_exc()}")
                     time.sleep(1)  # Wait before restarting
 
@@ -103,7 +103,7 @@ class Controller:
 
     def start_smbsloweraod(self) -> subprocess.Popen:
         """Start the smbsloweraod process and return the process object."""
-        ebpf_binary_path = os.path.join(os.path.dirname(__file__), "smbsloweraod")
+        ebpf_binary_path = os.path.join(os.path.dirname(__file__), "bin", "smbsloweraod")
         min_threshold, track_cmds = self._get_smbsloweraod_args()
         return subprocess.Popen(
             [ebpf_binary_path, "-m", str(min_threshold), "-c", track_cmds],

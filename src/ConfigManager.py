@@ -3,7 +3,8 @@
 import warnings
 import yaml
 from shared_data import ALL_SMB_CMDS, ALL_ERROR_CODES
-from models import Config, WatcherConfig, GuardianConfig, AnomalyConfig, AnomalyType
+from utils.anomaly_type import AnomalyType
+from utils.config import Config, WatcherConfig, GuardianConfig, AnomalyConfig
 
 
 class ConfigManager:
@@ -11,6 +12,7 @@ class ConfigManager:
     Loads and parses the YAML configuration file, validates anomaly and watcher settings,
     and constructs the top-level configuration object for the diagnostics service.
     """
+
     def __init__(self, config_path: str):
         """
         Initializes the ConfigManager by loading and parsing the configuration file.
@@ -122,7 +124,7 @@ class ConfigManager:
         self._validate_cmds(
             all_codes=list(ALL_SMB_CMDS.keys()),
             track_codes=track_cmd_names,
-            exclude_codes=exclude_cmd_names
+            exclude_codes=exclude_cmd_names,
         )
 
         # Check threshold validity for track_commands
@@ -151,10 +153,14 @@ class ConfigManager:
         Warns and clears the irrelevant list if needed.
         """
         if mode == "trackonly" and exclude_items:
-            warnings.warn(f"{anomaly_type.capitalize()} exclude items will be ignored in trackonly mode.")
+            warnings.warn(
+                f"{anomaly_type.capitalize()} exclude items will be ignored in trackonly mode."
+            )
             exclude_items = []
         elif mode == "excludeonly" and track_items:
-            warnings.warn(f"{anomaly_type.capitalize()} track items will be ignored in excludeonly mode.")
+            warnings.warn(
+                f"{anomaly_type.capitalize()} track items will be ignored in excludeonly mode."
+            )
             track_items = []
         return track_items, exclude_items
 
@@ -162,6 +168,7 @@ class ConfigManager:
         """
         Build the command map for latency anomaly detection.
         """
+
         def get_threshold(cmd_dict):
             return cmd_dict.get("threshold", default_threshold)
 
@@ -194,13 +201,17 @@ class ConfigManager:
         default_threshold = anomaly.get("default_threshold_ms", 10)
 
         # Validate latency mode constraints
-        track_commands, exclude_commands = self._normalize_mode(latency_mode, track_commands, exclude_commands, "latency")
+        track_commands, exclude_commands = self._normalize_mode(
+            latency_mode, track_commands, exclude_commands, "latency"
+        )
 
         # Validate commands and thresholds
         self._validate_smb_commands(track_commands, exclude_commands)
 
         # Build command map
-        return self._build_latency_command_map(latency_mode, track_commands, exclude_commands, default_threshold)
+        return self._build_latency_command_map(
+            latency_mode, track_commands, exclude_commands, default_threshold
+        )
 
     def _get_error_track_cmds(self, anomaly):
         """Parse and validate latency anomaly tracking commands from the config."""
@@ -209,7 +220,9 @@ class ConfigManager:
         error_mode = anomaly.get("mode", "all")
 
         # Normalize mode and codes
-        track_codes, exclude_codes = self._normalize_mode(error_mode, track_codes, exclude_codes, "error")
+        track_codes, exclude_codes = self._normalize_mode(
+            error_mode, track_codes, exclude_codes, "error"
+        )
 
         # Validate codes
         all_error_codes = list(ALL_ERROR_CODES)  # Replace with your actual error code list

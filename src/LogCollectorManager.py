@@ -8,7 +8,9 @@ import signal
 import concurrent.futures
 from abc import ABC, abstractmethod
 
-PDEATHSIG_WRAPPER = os.path.join(os.path.dirname(__file__), "pdeathsig_wrapper.py")
+import os
+
+PDEATHSIG_WRAPPER = os.path.join(os.path.dirname(__file__), "utils", "pdeathsig_wrapper.py")
 TOOL_SHUTDOWN_SLEEP_SEC = 10
 
 

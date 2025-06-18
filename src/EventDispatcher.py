@@ -9,7 +9,7 @@ import time
 import struct
 import numpy as np
 
-from shared_data import SHM_NAME, SHM_SIZE, SHM_DATA_SIZE, HEAD_TAIL_BYTES, event_dtype
+from shared_data import SHM_NAME, SHM_SIZE, SHM_DATA_SIZE, HEAD_TAIL_BYTES, event_dtype, MAX_WAIT
 
 # Ensure that the size of Event and event_dtype is same
 # assert ctypes.sizeof(Event) == event_dtype.itemsize, (
@@ -68,24 +68,43 @@ class EventDispatcher:
 
         return shm_fd, shm_map
 
+    def _get_buffer_size(self) -> int:
+        """Tells how much data is available in the shared memory buffer."""
+        self.shm_map.seek(0)
+        head = struct.unpack_from(self.head_tail_fmt, self.shm_map, 0)[0]
+        tail = struct.unpack_from(self.head_tail_fmt, self.shm_map, HEAD_TAIL_BYTES)[0]
+        if tail == head:
+            return 0
+        if tail < head:
+            return head - tail
+        # Wrap-around case
+        return (SHM_DATA_SIZE - tail) + head
+
     def run(self) -> None:
         """Loop: poll eventQueue, detect anomalies, and put actions into anomalyActionQueue"""
         print("EventDispatcher started running")
-        events_buffer = np.empty(0, dtype=event_dtype)
-        last_dispatch_time = time.time()
+        timer = 3
         while not self.controller.stop_event.is_set():
-            raw_events = self._poll_shm_buffer()
-            parsed_events = self._parse(raw_events)
-            if parsed_events is not None:
-                events_buffer = np.concatenate((events_buffer, parsed_events))
-            if events_buffer.size >= 10 or (
-                time.time() - last_dispatch_time > 3 and events_buffer.size > 0
-            ):
-                self.controller.eventQueue.put(events_buffer)
-                last_dispatch_time = time.time()
-                print("[Event Dispatcher] Batch put")
-                events_buffer = np.empty(0, dtype=event_dtype)
-            time.sleep(1)
+            no_of_events = self._get_buffer_size() // event_dtype.itemsize
+            if no_of_events >= 10 or timer == 0:
+                print(
+                    f"[Event Dispatcher] {no_of_events} events available, dispatching them"
+                )
+                timer = 3  # reset timer
+                if no_of_events == 0:
+                    print("[Event Dispatcher] No events available, waiting for more")
+                    continue
+                time.sleep(MAX_WAIT)
+                raw_events = self._poll_shm_buffer()
+                parsed_events = self._parse(raw_events)
+                self.controller.eventQueue.put(parsed_events)
+            else:
+                print(
+                    f"[Event Dispatcher] Waiting for more events, {no_of_events} available, "
+                    f"sleeping for {timer} seconds"
+                )
+                time.sleep(1)
+                timer -= 1
 
     def _poll_shm_buffer(self) -> bytes:
         """Fetch a batch of raw events from shared memory."""
@@ -133,8 +152,8 @@ class EventDispatcher:
         try:
             # Read head and tail before closing mmap
             self.shm_map.seek(0)
-            head = struct.unpack_from("<Q", self.shm_map, 0)[0]
-            tail = struct.unpack_from("<Q", self.shm_map, 8)[0]
+            head = struct.unpack_from(self.head_tail_fmt, self.shm_map, 0)[0]
+            tail = struct.unpack_from(self.head_tail_fmt, self.shm_map, 8)[0]
             if head != tail:
                 print(
                     "EventDispatcher: Warning - head and tail are not equal, indicating potential data loss."

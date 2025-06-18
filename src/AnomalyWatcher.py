@@ -7,11 +7,13 @@ import queue
 import time
 import numpy as np
 
-from shared_data import event_dtype
-from models import AnomalyType
-from handlers import LatencyAnomalyHandler, ErrorAnomalyHandler
-from base import AnomalyHandler
+from shared_data import event_dtype, MAX_WAIT
+from utils.anomaly_type import AnomalyType, ANOMALY_TYPE_TO_TOOL_ID
+from handlers.latency_anomaly_handler import LatencyAnomalyHandler
+from handlers.error_anomaly_handler import ErrorAnomalyHandler
+from base.anomaly_handler_base import AnomalyHandler
 
+# Maps enum to anomaly handler classes.
 ANOMALY_HANDLER_REGISTRY = {
     AnomalyType.LATENCY: LatencyAnomalyHandler,
     AnomalyType.ERROR: ErrorAnomalyHandler,
@@ -37,54 +39,46 @@ class AnomalyWatcher:
     def _load_anomaly_handlers(self, config) -> dict[AnomalyType, AnomalyHandler]:
         handler_map = {}
         for anomaly_name, anomaly_cfg in config.guardian.anomalies.items():
-            anomaly_type_str = anomaly_cfg.type.lower()
-            handler_class = ANOMALY_HANDLER_REGISTRY.get(anomaly_type_str)
             try:
-                anomaly_type_enum = AnomalyType(anomaly_type_str)
-            except ValueError:
+                anomaly_type_enum = AnomalyType(anomaly_cfg.type.strip().lower())
+            except ValueError as exc:
                 print(
-                    f"[AnomalyWatcher] Warning: Unknown anomaly type '{anomaly_type_str}' for '{anomaly_name}'"
+                    f"[AnomalyWatcher] Warning: Unknown anomaly type '{anomaly_cfg.type}' for '{anomaly_name}'"
                 )
                 continue
+
+            handler_class = ANOMALY_HANDLER_REGISTRY.get(anomaly_type_enum)
             if handler_class:
                 handler_map[anomaly_type_enum] = handler_class(anomaly_cfg)
             else:
                 print(
-                    f"[AnomalyWatcher] Warning: No handler registered for anomaly type '{anomaly_type_str}'"
+                    f"[AnomalyWatcher] Warning: No handler registered for anomaly type '{anomaly_cfg.type}'"
                 )
         return handler_map
-
-    def _get_batch(self) -> np.ndarray:
-        """Fetch and combine all available batches from the eventQueue into a single numpy array."""
-        combined_batches = np.empty(0, dtype=event_dtype)
-        while True:
-            try:
-                batch = self.controller.eventQueue.get_nowait()
-                combined_batches = np.concatenate((combined_batches, batch))
-            except queue.Empty:
-                break
-        return combined_batches
 
     def run(self) -> None:
         """Loop: poll eventQueue, detect anomalies, and put actions into anomalyActionQueue"""
         while not self.controller.stop_event.is_set():
-            batch = self._get_batch()
+            # wait for events in the queue
+            batch = self.controller.eventQueue.get(True)
+            # wait for some time to accumulate more events
+            end_time = time.time() + MAX_WAIT
+            # collect a batch of events
+            while time.time() < end_time:
+                try:
+                    batch = np.concatenate(
+                        (batch, self.controller.eventQueue.get_nowait())
+                    )
+                except queue.Empty:
+                    break
+            # process the batch of events
+            for anomaly_type, handler in self.handlers.items():
+                tool_id = ANOMALY_TYPE_TO_TOOL_ID[anomaly_type]
+                masked_batch = batch[ batch["tool"] == tool_id]
+                if handler.detect(masked_batch):
+                    action = self._generate_action(anomaly_type)
+                    self.controller.anomalyActionQueue.put(action)
 
-            # print each event (reomve this code later)
-            if batch.size > 0:
-                print("[Anomaly Watcher] Batch")
-            for event in batch:
-                print(f"Event: {event}")
-
-            if batch.size > 0:
-                for anomaly_type, handler in self.handlers.items():
-                    # this will only filter latency anomalies for now (tool=0)
-                    filtered_batch = batch[batch["tool"] == 0]
-                    # filtered_batch = batch[np.where(batch["tool"] == 0)]
-                    # can do this also, but the method without np.where is faster
-                    if handler.detect(filtered_batch):
-                        action = self._generate_action(anomaly_type)
-                        self.controller.anomalyActionQueue.put(action)
             time.sleep(self.interval)
 
     def _generate_action(self, anomaly_type: AnomalyType) -> dict:
