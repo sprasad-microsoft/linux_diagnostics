@@ -1,39 +1,48 @@
-from shared_data import *
-import yaml
+"""Parses the config YAML into python dataclass."""
+
 import warnings
+import yaml
+from shared_data import ALL_SMB_CMDS, ALL_ERROR_CODES
+from models import Config, WatcherConfig, GuardianConfig, AnomalyConfig, AnomalyType
 
 
 class ConfigManager:
-
+    """
+    Loads and parses the YAML configuration file, validates anomaly and watcher settings,
+    and constructs the top-level configuration object for the diagnostics service.
+    """
     def __init__(self, config_path: str):
+        """
+        Initializes the ConfigManager by loading and parsing the configuration file.
+        """
+        config_data = self._load_yaml(config_path)
+        watcher = self._parse_watcher(config_data)
+        guardian = self._parse_guardian(config_data)
+        self.data = self._build_config(config_data, watcher, guardian)
+
+    def _load_yaml(self, config_path: str):
+        """Load the YAML configuration file."""
         try:
-            with open(config_path, "r") as file:
-                config_data = yaml.safe_load(file)
-        except FileNotFoundError:
-            raise RuntimeError(f"Config file not found: {config_path}")
-        except yaml.YAMLError as e:
-            raise RuntimeError(f"YAML parsing error in config file: {e}")
+            with open(config_path, "r", encoding="utf-8") as file:
+                return yaml.safe_load(file)
+        except FileNotFoundError as exc:
+            raise RuntimeError(f"Config file not found: {config_path}") from exc
+        except yaml.YAMLError as exc:
+            raise RuntimeError(f"YAML parsing error in config file: {exc}") from exc
 
-        # Parse watcher
-        watcher = WatcherConfig(actions=config_data["watcher"]["actions"])
+    def _parse_watcher(self, config_data: dict):
+        """Parse the watcher section of the config."""
+        return WatcherConfig(actions=config_data["watcher"]["actions"])
 
-        # Parse guardian anomalies
+    def _parse_guardian(self, config_data: dict):
+        """Parse the guardian section and its anomalies."""
         anomalies = {}
         for name, anomaly in config_data["guardian"]["anomalies"].items():
-
-            # depending on the type of anomaly, i want to call different functions
-            if anomaly["type"] == "Latency":
-                track = self.get_latency_track_cmds(anomaly)
-            elif anomaly["type"] == "Error":
-                track = self.get_error_track_cmds(anomaly)
-
-            print(f"track: {track}")
-            # Check if track is empty after all logic
+            track = self._get_track_for_anomaly(anomaly)
             if not track or (isinstance(track, dict) and len(track) == 0):
                 raise ValueError(
                     f"No items to track for anomaly '{name}' after applying config logic."
                 )
-
             anomalies[name] = AnomalyConfig(
                 type=anomaly["type"],
                 tool=anomaly["tool"],
@@ -42,10 +51,29 @@ class ConfigManager:
                 track=track,
                 actions=anomaly.get("actions", []),
             )
-        guardian = GuardianConfig(anomalies=anomalies)
+        return GuardianConfig(anomalies=anomalies)
 
-        # Build the top-level config
-        self.data = Config(
+    def _get_track_for_anomaly(self, anomaly: dict):
+        """Dispatch to the correct track extraction function based on anomaly type using Enum."""
+        anomaly_type_str = anomaly["type"].strip().lower()
+        try:
+            anomaly_type = AnomalyType(anomaly_type_str)
+        except ValueError as exc:
+            raise ValueError(f"Unknown anomaly type: {anomaly['type']}") from exc
+        dispatch = {
+            AnomalyType.LATENCY: self._get_latency_track_cmds,
+            AnomalyType.ERROR: self._get_error_track_cmds,
+            # Add more types here as needed
+        }
+
+        if anomaly_type not in dispatch:
+            raise ValueError(f"No handler for anomaly type: {anomaly_type.value}")
+
+        return dispatch[anomaly_type](anomaly)
+
+    def _build_config(self, config_data: dict, watcher, guardian):
+        """Build the top-level config object."""
+        return Config(
             watch_interval_sec=config_data["watch_interval_sec"],
             aod_output_dir=config_data["aod_output_dir"],
             watcher=watcher,
@@ -54,25 +82,24 @@ class ConfigManager:
             audit=config_data["audit"],
         )
 
-    def validate_cmds(self, all_codes, track_codes, exclude_codes):
+    def _check_codes(self, codes, all_codes, code_type):
+        """Check that codes are present in all_codes, not duplicated, and not empty."""
+        seen = set()
+        for code in codes:
+            if code not in all_codes:
+                raise ValueError(f"Code {code} not found in {code_type}.")
+            if code in seen:
+                warnings.warn(f"Code {code} is duplicated in {code_type}.", UserWarning)
+            seen.add(code)
+
+    def _validate_cmds(self, all_codes, track_codes, exclude_codes):
+        """Validate that track and exclude codes/cmds are present, not duplicated, and not overlapping."""
 
         # check if any track_codes are duplicated
-        present_track_codes = set()
-        for code in track_codes:
-            if code not in all_codes:
-                raise ValueError(f"Code {code} not found in error codes.")
-            if code in present_track_codes:
-                warnings.warn(f"Code {code} is duplicated in track codes.", UserWarning)
-            present_track_codes.add(code)
+        self._check_codes(track_codes, all_codes, "track codes")
 
         # check if any exclude_codes are duplicated
-        present_exclude_codes = set()
-        for code in exclude_codes:
-            if code not in all_codes:
-                raise ValueError(f"Code {code} not found in error codes.")
-            if code in present_exclude_codes:
-                warnings.warn(f"Code {code} is duplicated in exclude codes.", UserWarning)
-            present_exclude_codes.add(code)
+        self._check_codes(exclude_codes, all_codes, "exclude codes")
 
         # check if any track_codes are in exclude_codes
         for code in track_codes:
@@ -81,141 +108,112 @@ class ConfigManager:
                     f"Code {code} is duplicated in track and exclude codes. It is unclear if Code {code} should be tracked or excluded."
                 )
 
-    def validate_smb_commands(self, track_commands, exclude_commands):
+    def _validate_smb_commands(self, track_commands, exclude_commands):
+        """
+        Validate SMB commands for tracking and exclusion.
+        Checks for duplicates and presence using validate_cmds,
+        and checks threshold validity using a separate function.
+        """
+        # Extract command names from track_commands (list of dicts)
+        track_cmd_names = [cmd["command"] for cmd in (track_commands or []) if "command" in cmd]
+        exclude_cmd_names = exclude_commands or []
 
-        # Handle missing TrackCommands (default to empty list)
-        track_commands = track_commands if track_commands is not None else []
-        exclude_commands = exclude_commands if exclude_commands is not None else []
+        # Use validate_cmds to check for duplicates and presence
+        self._validate_cmds(
+            all_codes=list(ALL_SMB_CMDS.keys()),
+            track_codes=track_cmd_names,
+            exclude_codes=exclude_cmd_names
+        )
 
-        # If both are empty, nothing to validate
-        if not track_commands and not exclude_commands:
-            return
+        # Check threshold validity for track_commands
+        self._validate_smb_thresholds(track_commands)
 
-        # Use an integer where 2^i indicates if i-th command is present
-        present_track_cmds = 0
-        present_exclude_cmds = 0
+    def _validate_smb_thresholds(self, track_commands):
+        """
+        Check that all thresholds in track_commands are valid (int/float and >= 0).
+        """
+        for command in track_commands or []:
+            if "threshold" in command:
+                threshold = command["threshold"]
+                if not isinstance(threshold, (int, float)) or threshold < 0:
+                    raise ValueError(f"Invalid threshold value in track command: {command}")
 
-        # Checks for duplicate track commands
-        for command in track_commands:
-            if "command" not in command:
-                raise ValueError(f"Missing 'command' key in TrackCommands: {command}")
-            try:
-                cmd = command["command"]
-                if cmd in ALL_SMB_CMDS:
-                    if present_track_cmds & (1 << ALL_SMB_CMDS[cmd]):
-                        warnings.warn(
-                            f"Command {cmd} is duplicated in track commands.", UserWarning
-                        )
-                        continue
-                    if "threshold" in command and (
-                        not isinstance(command["threshold"], (int, float))
-                        or command["threshold"] < 0
-                    ):
-                        raise ValueError(f"Invalid threshold value in track command: {command}")
-                    present_track_cmds |= 1 << ALL_SMB_CMDS[cmd]
-                else:
-                    raise ValueError(f"Command {cmd} not found in ALL_SMB_CMDS.")
-            except (TypeError, KeyError):
-                raise ValueError(f"Invalid track command format: {command}")
-
-        # Check for duplicate exclude commands
-        for cmd in exclude_commands:
-            try:
-                if cmd in ALL_SMB_CMDS:
-                    if present_exclude_cmds & (1 << ALL_SMB_CMDS[cmd]):
-                        warnings.warn(
-                            f"Command {cmd} is duplicated in exclude commands.", UserWarning
-                        )
-                        continue
-                    present_exclude_cmds |= 1 << ALL_SMB_CMDS[cmd]
-                else:
-                    raise ValueError(f"Command {cmd} not found in ALL_SMB_CMDS.")
-            except (TypeError, KeyError):
-                raise ValueError(f"Invalid exclude command format: {command}")
-
-        # Check for duplicate commands between track and exclude
-        for command in exclude_commands:
-            try:
-                cmd = command
-                if cmd in ALL_SMB_CMDS:
-                    if present_track_cmds & (1 << ALL_SMB_CMDS[cmd]):
-                        raise ValueError(
-                            f"Command {cmd} is duplicated in track or exclude commands. It is unclear if Command {cmd} should be tracked or excluded."
-                        )
-                else:
-                    raise ValueError(f"Command {cmd} not found in ALL_SMB_CMDS.")
-            except (TypeError, KeyError):
-                raise ValueError(f"Invalid exclude command format: {command}")
-
-    def get_track_codes(self, mode, all_codes, track_codes, exclude_codes):
-
+    def _get_track_codes(self, mode, all_codes, track_codes, exclude_codes):
+        """Get the track codes based on the mode and provided codes."""
         if mode == "trackonly":
             return {code: None for code in track_codes}
-        else:
-            exclude_set = set(exclude_codes)
-            return {code: None for code in all_codes if code not in exclude_set}
+        exclude_set = set(exclude_codes)
+        return {code: None for code in all_codes if code not in exclude_set}
 
-    def get_latency_track_cmds(self, anomaly):
+    def _normalize_mode(self, mode: str, track_items, exclude_items, anomaly_type: str = "anomaly"):
+        """
+        Normalize track and exclude items based on the mode.
+        Warns and clears the irrelevant list if needed.
+        """
+        if mode == "trackonly" and exclude_items:
+            warnings.warn(f"{anomaly_type.capitalize()} exclude items will be ignored in trackonly mode.")
+            exclude_items = []
+        elif mode == "excludeonly" and track_items:
+            warnings.warn(f"{anomaly_type.capitalize()} track items will be ignored in excludeonly mode.")
+            track_items = []
+        return track_items, exclude_items
+
+    def _build_latency_command_map(self, mode, track_commands, exclude_commands, default_threshold):
+        """
+        Build the command map for latency anomaly detection.
+        """
+        def get_threshold(cmd_dict):
+            return cmd_dict.get("threshold", default_threshold)
+
+        all_cmds = list(ALL_SMB_CMDS.keys())
+        command_map = {}
+
+        if mode == "trackonly":
+            for cmd_dict in track_commands:
+                cmd = cmd_dict["command"]
+                command_map[cmd] = get_threshold(cmd_dict)
+        elif mode == "excludeonly":
+            for cmd in all_cmds:
+                if cmd not in exclude_commands:
+                    command_map[cmd] = default_threshold
+        else:  # mode == "all"
+            for cmd in all_cmds:
+                command_map[cmd] = default_threshold
+            for cmd_dict in track_commands:
+                cmd = cmd_dict["command"]
+                command_map[cmd] = get_threshold(cmd_dict)
+            for cmd in exclude_commands:
+                command_map.pop(cmd, None)
+        return command_map
+
+    def _get_latency_track_cmds(self, anomaly):
+        """Parse and validate latency anomaly tracking commands from the config."""
         track_commands = anomaly.get("track_commands", []) or []
         exclude_commands = anomaly.get("exclude_commands", []) or []
         latency_mode = anomaly.get("mode", "all")
-
-        # Validate latency mode constraints
-        if latency_mode == "trackonly" and exclude_commands:
-            warnings.warn("Exclude commands will be ignored in trackonly mode.")
-            exclude_commands = []
-        elif latency_mode == "excludeonly" and track_commands:
-            warnings.warn("Track commands will be ignored in excludeonly mode.")
-            track_commands = []
-
-        self.validate_smb_commands(track_commands, exclude_commands)
-
-        # Initialize all commands to -1
-        command_map = {cmd: -1 for cmd in ALL_SMB_CMDS}
         default_threshold = anomaly.get("default_threshold_ms", 10)
 
-        # Apply thresholds based on mode
-        if latency_mode == "trackonly":
-            command_map = {}
-            for cmd in track_commands:
-                command = cmd["command"]
-                threshold = cmd.get("threshold", default_threshold)
-                command_map[command] = threshold
-        elif latency_mode == "excludeonly":
-            for cmd in command_map:
-                command_map[cmd] = default_threshold
-            for cmd in exclude_commands:
-                if cmd in command_map:
-                    del command_map[cmd]
-            print("haha")
-        else:  # mode == "all"
-            for cmd in command_map:
-                command_map[cmd] = default_threshold
-            for cmd in track_commands:
-                command = cmd["command"]
-                threshold = cmd.get("threshold", default_threshold)
-                command_map[command] = threshold
-            for cmd in exclude_commands:  # delete if it is over here
-                if cmd in command_map:
-                    del command_map[cmd]
+        # Validate latency mode constraints
+        track_commands, exclude_commands = self._normalize_mode(latency_mode, track_commands, exclude_commands, "latency")
 
-        return command_map
+        # Validate commands and thresholds
+        self._validate_smb_commands(track_commands, exclude_commands)
 
-    def get_error_track_cmds(self, anomaly):
+        # Build command map
+        return self._build_latency_command_map(latency_mode, track_commands, exclude_commands, default_threshold)
 
+    def _get_error_track_cmds(self, anomaly):
+        """Parse and validate latency anomaly tracking commands from the config."""
         track_codes = anomaly.get("track_codes", [])
         exclude_codes = anomaly.get("exclude_codes", [])
         error_mode = anomaly.get("mode", "all")
 
-        # Validate error mode constraints
-        if error_mode == "trackonly" and exclude_codes:
-            warnings.warn("Exclude codes will be ignored in trackonly mode.")
-            exclude_codes = []
-        elif error_mode == "excludeonly" and track_codes:
-            warnings.warn("Track codes will be ignored in excludeonly mode.")
-            track_codes = []
+        # Normalize mode and codes
+        track_codes, exclude_codes = self._normalize_mode(error_mode, track_codes, exclude_codes, "error")
 
-        # Validate track and exclude codes
-        self.validate_cmds(error_codes, track_codes, exclude_codes)
+        # Validate codes
+        all_error_codes = list(ALL_ERROR_CODES)  # Replace with your actual error code list
+        self._validate_cmds(all_error_codes, track_codes, exclude_codes)
 
-        return self.get_track_codes(error_mode, error_codes, track_codes, exclude_codes)
+        # Get track codes based on the mode
+        return self._get_track_codes(error_mode, ALL_ERROR_CODES, track_codes, exclude_codes)

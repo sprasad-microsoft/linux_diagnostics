@@ -7,14 +7,14 @@ import queue
 import time
 import numpy as np
 
-from shared_data import event_dtype, AnomalyType
-from handlers.latency_anomaly_handler import LatencyAnomalyHandler
-from handlers.error_anomaly_handler import ErrorAnomalyHandler
-from base.anomaly_handler_base import AnomalyHandler
+from shared_data import event_dtype
+from models import AnomalyType
+from handlers import LatencyAnomalyHandler, ErrorAnomalyHandler
+from base import AnomalyHandler
 
 ANOMALY_HANDLER_REGISTRY = {
-    "latency": LatencyAnomalyHandler,
-    "error": ErrorAnomalyHandler,
+    AnomalyType.LATENCY: LatencyAnomalyHandler,
+    AnomalyType.ERROR: ErrorAnomalyHandler,
     # Add more types here as needed
 }
 

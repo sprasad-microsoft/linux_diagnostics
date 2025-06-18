@@ -1,40 +1,24 @@
-from dataclasses import dataclass, field
-from typing import Optional
+"""
+Data shared between multiple aod componenets.
+"""
+
 import ctypes
-import numpy as np
-from types import MappingProxyType
 import errno
+from types import MappingProxyType
+import numpy as np
 
 
-@dataclass(slots=True, frozen=True)
-class AnomalyConfig:
-    type: str
-    tool: str
-    acceptable_percentage: int
-    default_threshold_ms: Optional[int] = None
-    track: dict[str, Optional[int]] = field(default_factory=dict)
-    actions: list[str] = field(default_factory=list)
+SHM_NAME = "/bpf_shm"
+TASK_COMM_LEN = 16
 
+# Assuming we are working with x64 architecture for now
+HEAD_TAIL_BYTES = 8
+MAX_ENTRIES = 2048
+PAGE_SIZE = 4096
+# Beware before changing page size, shm data size has a condition that is must be a multiple of the page size
 
-@dataclass(slots=True, frozen=True)
-class GuardianConfig:
-    anomalies: dict[str, AnomalyConfig]
-
-
-@dataclass(slots=True, frozen=True)
-class WatcherConfig:
-    actions: list[str]
-
-
-@dataclass(slots=True, frozen=True)
-class Config:  # top-level config
-    watch_interval_sec: int
-    aod_output_dir: str
-    watcher: WatcherConfig
-    guardian: GuardianConfig
-    cleanup: dict  # could make a dataclass if desired
-    audit: dict  # could make a dataclass if desired
-
+SHM_SIZE = (MAX_ENTRIES + 1) * PAGE_SIZE
+SHM_DATA_SIZE = SHM_SIZE // 10 - 2 * HEAD_TAIL_BYTES  # delete /10 later
 
 ALL_SMB_CMDS = MappingProxyType(
     {
@@ -61,27 +45,14 @@ ALL_SMB_CMDS = MappingProxyType(
     }
 )
 
-error_codes = list(errno.errorcode.values())
-
-SHM_NAME = "/bpf_shm"
-TASK_COMM_LEN = 16
-
-# Assuming we are working with x64 architecture for now
-HEAD_TAIL_BYTES = 8
-MAX_ENTRIES = 2048
-PAGE_SIZE = 4096
-# Beware before changing page size, shm data size has a condition that is must be a multiple of the page size
-
-SHM_SIZE = (MAX_ENTRIES + 1) * PAGE_SIZE
-SHM_DATA_SIZE = SHM_SIZE // 10 - 2 * HEAD_TAIL_BYTES  # delete /10 later
-SHM_DATA_SIZE_fake = 0
-
+ALL_ERROR_CODES = list(errno.errorcode.values())
 
 class Metrics(ctypes.Union):
     _fields_ = [("latency_ns", ctypes.c_ulonglong), ("retval", ctypes.c_int)]
 
 
 class Event(ctypes.Structure):
+    """Event c struct"""
     _fields_ = [
         ("pid", ctypes.c_int),
         ("cmd_end_time_ns", ctypes.c_ulonglong),
@@ -110,11 +81,3 @@ event_dtype = np.dtype(
     ],
     align=True,
 )
-
-from enum import Enum
-
-
-class AnomalyType(Enum):
-    LATENCY = "latency"
-    ERROR = "error"
-    # Add more types as needed
