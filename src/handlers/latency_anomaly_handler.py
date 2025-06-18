@@ -16,7 +16,7 @@ class LatencyAnomalyHandler(AnomalyHandler):
 
     def __init__(self, latency_config):
         super().__init__(latency_config)
-        self.acceptable_percentage = self.config.acceptable_percentage
+        self.acceptable_count = self.config.acceptable_count
         # bcos im iterating over an array of size 20, using for loop wont affect the performance
         self.threshold_lookup = np.full(len(ALL_SMB_CMDS) + 1, 0, dtype=np.uint64)
         for smb_cmd, threshold in self.config.track.items():
@@ -28,10 +28,7 @@ class LatencyAnomalyHandler(AnomalyHandler):
         anomaly_count = np.sum(
             (events_batch["metric_latency_ns"] >= self.threshold_lookup[events_batch["smbcommand"]])
         )
-        anomaly_percentage = anomaly_count / events_batch.size
-        # print(f"Events:{arr}") #for debugging
+        max_latency = np.max(events_batch["metric_latency_ns"])
 
         print(f"[AnomalyHandler] Detected {anomaly_count} latency anomalies for {self.config.tool}")
-        print(f"{self.acceptable_percentage}")
-        return anomaly_count >= 1
-        return anomaly_percentage >= self.acceptable_percentage
+        return anomaly_count >= self.acceptable_count or max_latency >= 1e9  # 1 second

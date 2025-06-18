@@ -48,7 +48,7 @@ class ConfigManager:
             anomalies[name] = AnomalyConfig(
                 type=anomaly["type"],
                 tool=anomaly["tool"],
-                acceptable_percentage=anomaly["acceptable_percentage"],
+                acceptable_count=anomaly["acceptable_count"],
                 default_threshold_ms=anomaly.get("default_threshold_ms"),
                 track=track,
                 actions=anomaly.get("actions", []),
