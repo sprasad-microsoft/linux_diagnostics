@@ -87,22 +87,14 @@ class EventDispatcher:
         while not self.controller.stop_event.is_set():
             no_of_events = self._get_buffer_size() // event_dtype.itemsize
             if no_of_events >= 10 or timer == 0:
-                print(
-                    f"[Event Dispatcher] {no_of_events} events available, dispatching them"
-                )
                 timer = 3  # reset timer
                 if no_of_events == 0:
-                    print("[Event Dispatcher] No events available, waiting for more")
                     continue
                 time.sleep(MAX_WAIT)
                 raw_events = self._poll_shm_buffer()
                 parsed_events = self._parse(raw_events)
                 self.controller.eventQueue.put(parsed_events)
             else:
-                print(
-                    f"[Event Dispatcher] Waiting for more events, {no_of_events} available, "
-                    f"sleeping for {timer} seconds"
-                )
                 time.sleep(1)
                 timer -= 1
 

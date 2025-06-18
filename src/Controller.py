@@ -9,6 +9,7 @@ import queue
 import subprocess
 import os
 import signal
+from functools import partial
 import time
 import traceback
 
@@ -55,13 +56,13 @@ class Controller:
             while not self.stop_event.is_set():
                 try:
                     target(*args, **kwargs)
-                except Exception:
+                except RuntimeError:
                     print(f"{thread_name} died: {traceback.format_exc()}")
                     time.sleep(1)  # Wait before restarting
 
         t = threading.Thread(target=runner, name=thread_name, daemon=True)
         t.start()
-        print(f"Started thread {thread_name} with ID {t.ident}")
+        print(f"[Controller] Started thread {thread_name} with ID {t.ident}")
         self.threads.append(t)
 
     def _supervise_process(self, process_name: str, start_func: callable) -> None:
@@ -69,22 +70,22 @@ class Controller:
         while not self.stop_event.is_set():
             process = start_func()
             self.tool_processes[process_name] = process
-            print(f"Started {process_name} process with PID {process.pid}")
+            print(f"[Controller] Started {process_name} process with PID {process.pid}")
             while True:
                 if self.stop_event.wait(timeout=1):
                     break
                 if process.poll() is not None:
                     print(
-                        f"{process_name} process exited unexpectedly with code {process.returncode}, restarting..."
+                        f"[Controller] {process_name} process exited unexpectedly with code {process.returncode}, restarting..."
                     )
                     break
             if self.stop_event.is_set():
                 try:
                     os.killpg(os.getpgid(process.pid), signal.SIGINT)
                     process.wait(timeout=5)
-                    print(f"{process_name} process stopped gracefully")
-                except Exception:  # pylint: disable=broad-except
-                    print(f"{process_name} process did not stop gracefully")
+                    print(f"[Controller] {process_name} process stopped gracefully")
+                except RuntimeError:
+                    print(f"[Controller] {process_name} process did not stop gracefully")
                 break
             time.sleep(1)
 
@@ -97,7 +98,7 @@ class Controller:
         min_threshold = min(list(latency_anomaly.track.values()))
 
         # track_cmds: list of all SMB commands we want to track, as numbers, comma-separated
-        smbcmds = [str(ALL_SMB_CMDS[cmd]) for cmd, threshold in latency_anomaly.track.items()]
+        smbcmds = [str(cmd_id) for cmd_id, threshold in latency_anomaly.track.items()]
         track_cmds = ",".join(smbcmds)
         return min_threshold, track_cmds
 
@@ -118,8 +119,8 @@ class Controller:
         """Shutdown all threads and components gracefully."""
         for thread in self.threads:
             thread.join(timeout=5)
-            print(f"Thread {thread.name} with ID {thread.ident} has been shut down")
-        print("Shutting down all components")
+            print(f"[Controller] Thread {thread.name} with ID {thread.ident} has been shut down")
+        print("[Controller] Shutting down all components")
         # Clean up shared memory via EventDispatcher
         if hasattr(self, "event_dispatcher"):
             self.event_dispatcher.cleanup()
@@ -159,6 +160,11 @@ class Controller:
         self.stop_event.wait()
         self._shutdown()
 
+def handle_signal(controller, signum, frame):
+    """Handle termination signals to gracefully shut down the controller."""
+    print(f"Received signal {signum}, shutting down...")
+    controller.stop()
+
 
 def main():
     """Main entry point for the AODv2 controller daemon."""
@@ -172,21 +178,14 @@ def main():
     # Use the config path relative to this file, as in controller_draft.py
     config_path = os.path.join(os.path.dirname(__file__), "../config/config.yaml")
     controller = Controller(config_path)
-
-    def handle_signal(signum, frame):
-        print(f"Received signal {signum}, shutting down...")
-        controller.stop()
-
-    # should i specify this in the Controller constructor?
-    signal.signal(signal.SIGTERM, handle_signal)
-    signal.signal(signal.SIGINT, handle_signal)
-
+    signal.signal(signal.SIGTERM, partial(handle_signal, controller))
+    signal.signal(signal.SIGINT, partial(handle_signal, controller))
     controller.run()
 
 
 if __name__ == "__main__":
     try:
         main()
-    except Exception as e:  # pylint: disable=broad-except
+    except Exception as e:
         print("Fatal error in main():", e)
         traceback.print_exc()

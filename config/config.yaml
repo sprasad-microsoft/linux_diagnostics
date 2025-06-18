@@ -15,7 +15,7 @@ guardian:
       type: "Error"
       tool: "smbiosnoop"
       mode: "trackonly"        # Options: all, trackonly, excludeonly
-      acceptable_percentage: 10  # % of error responses in X seconds
+      acceptable_count: 10  # % of error responses in X seconds
       track_codes:              # Error codes to track
         - EACCES
         - EAGAIN
@@ -31,7 +31,7 @@ guardian:
       type: "Latency"
       tool: "smbslower"
       mode: "all"              # Options: all, trackonly, excludeonly
-      acceptable_percentage: 5 # % of commands that can be slow
+      acceptable_count: 10     # number of commands with latency above threshold in X seconds
       default_threshold_ms: 10 # milliseconds, by default applies to all commands
       track_commands:          # Override: only trace these commands
         - command: SMB2_CREATE # Apply DefaultThreshold when no threshold provided

@@ -19,8 +19,8 @@ class LatencyAnomalyHandler(AnomalyHandler):
         self.acceptable_count = self.config.acceptable_count
         # bcos im iterating over an array of size 20, using for loop wont affect the performance
         self.threshold_lookup = np.full(len(ALL_SMB_CMDS) + 1, 0, dtype=np.uint64)
-        for smb_cmd, threshold in self.config.track.items():
-            self.threshold_lookup[ALL_SMB_CMDS[smb_cmd]] = threshold * 1000000
+        for smb_cmd_id, threshold in self.config.track.items():
+            self.threshold_lookup[smb_cmd_id] = threshold * 1000000
 
     # works only if ebpf code does filtering as per config file (i.e. ignore excluded cmds)
     def detect(self, events_batch: np.ndarray) -> bool:

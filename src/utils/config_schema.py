@@ -10,7 +10,7 @@ class AnomalyConfig:
     tool: str
     acceptable_count: int
     default_threshold_ms: Optional[int] = None
-    track: dict[str, Optional[int]] = field(default_factory=dict)
+    track: dict[int, Optional[int]] = field(default_factory=dict)
     actions: list[str] = field(default_factory=list)
 
 @dataclass(slots=True, frozen=True)

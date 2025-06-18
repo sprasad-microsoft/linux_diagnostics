@@ -4,7 +4,7 @@ import warnings
 import yaml
 from shared_data import ALL_SMB_CMDS, ALL_ERROR_CODES
 from utils.anomaly_type import AnomalyType
-from utils.config import Config, WatcherConfig, GuardianConfig, AnomalyConfig
+from utils.config_schema import Config, WatcherConfig, GuardianConfig, AnomalyConfig
 
 
 class ConfigManager:
@@ -110,6 +110,16 @@ class ConfigManager:
                     f"Code {code} is duplicated in track and exclude codes. It is unclear if Code {code} should be tracked or excluded."
                 )
 
+    def _validate_smb_thresholds(self, track_commands):
+        """
+        Check that all thresholds in track_commands are valid (int/float and >= 0).
+        """
+        for command in track_commands or []:
+            if "threshold" in command:
+                threshold = command["threshold"]
+                if not isinstance(threshold, (int, float)) or threshold < 0:
+                    raise ValueError(f"Invalid threshold value in track command: {command}")
+
     def _validate_smb_commands(self, track_commands, exclude_commands):
         """
         Validate SMB commands for tracking and exclusion.
@@ -130,24 +140,14 @@ class ConfigManager:
         # Check threshold validity for track_commands
         self._validate_smb_thresholds(track_commands)
 
-    def _validate_smb_thresholds(self, track_commands):
-        """
-        Check that all thresholds in track_commands are valid (int/float and >= 0).
-        """
-        for command in track_commands or []:
-            if "threshold" in command:
-                threshold = command["threshold"]
-                if not isinstance(threshold, (int, float)) or threshold < 0:
-                    raise ValueError(f"Invalid threshold value in track command: {command}")
-
     def _get_track_codes(self, mode, all_codes, track_codes, exclude_codes):
         """Get the track codes based on the mode and provided codes."""
         if mode == "trackonly":
-            return {code: None for code in track_codes}
+            return {ALL_ERROR_CODES.index(code): None for code in track_codes}
         exclude_set = set(exclude_codes)
-        return {code: None for code in all_codes if code not in exclude_set}
+        return {idx: None for idx, code in enumerate(ALL_ERROR_CODES) if code not in exclude_set}
 
-    def _normalize_mode(self, mode: str, track_items, exclude_items, anomaly_type: str = "anomaly"):
+    def _normalize_track_and_exclude(self, mode: str, track_items, exclude_items, anomaly_type: str = "anomaly"):
         """
         Normalize track and exclude items based on the mode.
         Warns and clears the irrelevant list if needed.
@@ -172,25 +172,26 @@ class ConfigManager:
         def get_threshold(cmd_dict):
             return cmd_dict.get("threshold", default_threshold)
 
-        all_cmds = list(ALL_SMB_CMDS.keys())
+        all_cmds = list(ALL_SMB_CMDS.values())
         command_map = {}
+        exclude_command_ids = [ALL_SMB_CMDS[cmd] for cmd in exclude_commands]
 
         if mode == "trackonly":
             for cmd_dict in track_commands:
-                cmd = cmd_dict["command"]
-                command_map[cmd] = get_threshold(cmd_dict)
+                cmd_id = ALL_SMB_CMDS[cmd_dict["command"]]
+                command_map[cmd_id] = get_threshold(cmd_dict)
         elif mode == "excludeonly":
-            for cmd in all_cmds:
-                if cmd not in exclude_commands:
-                    command_map[cmd] = default_threshold
+            for cmd_id in all_cmds:
+                if cmd_id not in exclude_command_ids:
+                    command_map[cmd_id] = default_threshold
         else:  # mode == "all"
-            for cmd in all_cmds:
-                command_map[cmd] = default_threshold
+            for cmd_id in all_cmds:
+                command_map[cmd_id] = default_threshold
             for cmd_dict in track_commands:
-                cmd = cmd_dict["command"]
-                command_map[cmd] = get_threshold(cmd_dict)
-            for cmd in exclude_commands:
-                command_map.pop(cmd, None)
+                cmd_id = ALL_SMB_CMDS[cmd_dict["command"]]
+                command_map[cmd_id] = get_threshold(cmd_dict)
+            for cmd_id in exclude_command_ids:
+                command_map.pop(cmd_id, None)
         return command_map
 
     def _get_latency_track_cmds(self, anomaly):
@@ -201,12 +202,13 @@ class ConfigManager:
         default_threshold = anomaly.get("default_threshold_ms", 10)
 
         # Validate latency mode constraints
-        track_commands, exclude_commands = self._normalize_mode(
+        track_commands, exclude_commands = self._normalize_track_and_exclude(
             latency_mode, track_commands, exclude_commands, "latency"
         )
 
         # Validate commands and thresholds
         self._validate_smb_commands(track_commands, exclude_commands)
+
 
         # Build command map
         return self._build_latency_command_map(
@@ -220,7 +222,7 @@ class ConfigManager:
         error_mode = anomaly.get("mode", "all")
 
         # Normalize mode and codes
-        track_codes, exclude_codes = self._normalize_mode(
+        track_codes, exclude_codes = self._normalize_track_and_exclude(
             error_mode, track_codes, exclude_codes, "error"
         )
 
