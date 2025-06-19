@@ -18,7 +18,6 @@ ANOMALY_HANDLER_REGISTRY = {
     # Add more types here as needed
 }
 
-
 class AnomalyWatcher:
     """Registers its own tail in eventQueue.
 
@@ -35,6 +34,7 @@ class AnomalyWatcher:
         self.handlers: dict[AnomalyType, AnomalyHandler] = self._load_anomaly_handlers(
             controller.config
         )
+        self.total_count = 0
 
     def _load_anomaly_handlers(self, config) -> dict[AnomalyType, AnomalyHandler]:
         handler_map = {}
@@ -58,23 +58,30 @@ class AnomalyWatcher:
 
     def run(self) -> None:
         """Loop: poll eventQueue, detect anomalies, and put actions into anomalyActionQueue"""
-        while not self.controller.stop_event.is_set():
+        while True:
             batch = self.controller.eventQueue.get(True)
             if batch is None:
                 self.controller.eventQueue.task_done()
+                self.controller.anomalyActionQueue.put(None)
                 break  # Exit loop on sentinel
 
             end_time = time.time() + MAX_WAIT
+            sentinal_found = False
             while time.time() < end_time:
                 try:
                     next_batch = self.controller.eventQueue.get_nowait()
                     if next_batch is None:
                         self.controller.eventQueue.task_done()
+                        sentinal_found = True
                         break  # Exit inner loop immediately on sentinel
                     batch = np.concatenate((batch, next_batch))
                     self.controller.eventQueue.task_done()
                 except queue.Empty:
                     break
+
+            
+            self.total_count += len(batch)
+            print(f"[AnomalyWatcher] Total count = {self.total_count}")
 
             for anomaly_type, handler in self.handlers.items():
                 tool_id = ANOMALY_TYPE_TO_TOOL_ID[anomaly_type]
@@ -84,6 +91,9 @@ class AnomalyWatcher:
                     self.controller.anomalyActionQueue.put(action)
 
             self.controller.eventQueue.task_done()
+            if sentinal_found:
+                self.controller.anomalyActionQueue.put(None)
+                break
             time.sleep(self.interval)
 
     def _generate_action(self, anomaly_type: AnomalyType) -> dict:

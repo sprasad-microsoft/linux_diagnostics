@@ -95,6 +95,7 @@ class EventDispatcher:
             else:
                 time.sleep(1)
                 timer -= 1
+        self.controller.eventQueue.put(None) #send sentinal to the queue
 
     def _poll_shm_buffer(self) -> bytes:
         """Fetch a batch of raw events from shared memory."""

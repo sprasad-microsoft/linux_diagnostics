@@ -155,7 +155,7 @@ class SpaceWatcher:
                 shutil.rmtree(batch)
                 total_size -= batch_sz
                 deleted_count += 1
-                print(f"[SpaceWatcher] Deleted batch {batch} ({batch_sz} bytes)")
+                #print(f"[SpaceWatcher] Deleted batch {batch} ({batch_sz} bytes)")
             except (FileNotFoundError, PermissionError, OSError) as e:
                 print(f"[SpaceWatcher] Failed to delete {batch}: {e}")
 
@@ -173,8 +173,8 @@ class SpaceWatcher:
                     shutil.rmtree(batch)
                     total_size -= batch_sz
                     deleted_count += 1
-                    print(f"[SpaceWatcher] Deleted in-progress batch {batch} ({batch_sz} bytes)")
+                    #print(f"[SpaceWatcher] Deleted in-progress batch {batch} ({batch_sz} bytes)")
                 except (FileNotFoundError, PermissionError, OSError) as e:
                     print(f"[SpaceWatcher] Failed to delete {batch}: {e}")
 
-        print(f"[SpaceWatcher] Size-based cleanup complete. Deleted {deleted_count} batches.")
+        print(f"[SpaceWatcher] Size-based cleanup complete. Deleted {deleted_count} batches. Total size now: {total_size / (1024 * 1024):.2f} MB")

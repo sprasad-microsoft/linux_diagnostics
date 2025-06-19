@@ -17,9 +17,7 @@ from shared_data import ALL_SMB_CMDS
 from ConfigManager import ConfigManager
 from EventDispatcher import EventDispatcher
 from AnomalyWatcher import AnomalyWatcher
-from LogCollectorManager import LogCollectorManager
-from LogCompressor import LogCompressor
-from AuditLogger import AuditLogger
+from LogCollector import LogCollector
 from SpaceWatcher import SpaceWatcher
 
 
@@ -34,8 +32,6 @@ class Controller:
         self.threads = []
         self.eventQueue = queue.Queue()
         self.anomalyActionQueue = queue.Queue()
-        self.archiveQueue = queue.Queue()
-        self.auditQueue = queue.Queue()
         self.tool_processes = {}
         self.tool_starters = {
             "smbslower": self.start_smbsloweraod,
@@ -44,11 +40,10 @@ class Controller:
 
         # Initialize all components
         self.event_dispatcher = EventDispatcher(self)
-        self.log_collector_manager = LogCollectorManager(self)
-        self.log_compressor = LogCompressor(self)
-        self.audit_logger = AuditLogger(self)
-        self.space_watcher = SpaceWatcher(self)
         self.anomaly_watcher = AnomalyWatcher(self)
+        self.log_collector_manager = LogCollector(self)
+        self.space_watcher = SpaceWatcher(self)
+
 
     def _supervise_thread(self, thread_name: str, target: callable, *args, **kwargs) -> None:
         """Start and supervise a thread, restarting it if it dies
@@ -121,17 +116,9 @@ class Controller:
     def _shutdown(self) -> None:
         """Shutdown all threads and components gracefully."""
 
-        # Unblock all queues to allow threads to exit
-        self.eventQueue.put(None)  # Sentinel to stop EventDispatcher
-        self.anomalyActionQueue.put(None)  # Sentinel to stop AnomalyWatcher
-        self.archiveQueue.put(None)  # Sentinel to stop LogCompressor
-        self.auditQueue.put(None)  # Sentinel to stop AuditLogger
-
-        # Wait for all items to be processed
+        # Wait for all queues to be processed
         self.eventQueue.join()
         self.anomalyActionQueue.join()
-        self.archiveQueue.join()
-        self.auditQueue.join()
 
         for thread in self.threads:
             thread.join(timeout=5)
@@ -172,8 +159,6 @@ class Controller:
         self._supervise_thread("EventDispatcher", self.event_dispatcher.run)
         self._supervise_thread("AnomalyWatcher", self.anomaly_watcher.run)
         self._supervise_thread("LogCollector", self.log_collector_manager.run)
-        self._supervise_thread("LogCompressor", self.log_compressor.run)
-        self._supervise_thread("AuditLogger", self.audit_logger.run)
         self._supervise_thread("SpaceWatcher", self.space_watcher.run)
         self.stop_event.wait()
         self._shutdown()

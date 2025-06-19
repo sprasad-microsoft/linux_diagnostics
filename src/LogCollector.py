@@ -1,6 +1,8 @@
 """When an anomaly is detected, this manager collects logs (runs quick actions)"""
 
 import os
+import queue
+import time
 import concurrent.futures
 
 from handlers.JournalctlQuickAction import JournalctlQuickAction
@@ -11,7 +13,7 @@ from handlers.MountsQuickAction import MountsQuickAction
 from handlers.SmbinfoQuickAction import SmbinfoQuickAction
 from handlers.SysLogsQuickAction import SysLogsQuickAction
 
-class LogCollectionManager:
+class LogCollector:
     """It consumes the anomalyActionQueue. 
     For each anomaly event, it submits the quick log collection actions “QuickActions” to a bounded threadpool"""
 
@@ -52,7 +54,7 @@ class LogCollectionManager:
 
     def _ensure_batch_dir(self, evt) -> str:
         batch_id = str(evt.get("batch_id", evt.get("timestamp", int(time.time()))))
-        batch_dir = os.path.join(f"aod_{self.batches_root}", batch_id)
+        batch_dir = os.path.join(self.batches_root, f"aod_{batch_id}")
         os.makedirs(batch_dir, exist_ok=True)
         print(f"[Log Collector][manager] Ensured batch directory exists: {batch_dir}")
         return batch_id
@@ -64,10 +66,10 @@ class LogCollectionManager:
         print("[Log Collector][manager] LogCollectorManager started running")
         while not self.controller.stop_event.is_set():
             try:
-                print("[Log Collector][manager] Waiting for events in anomalyActionQueue")
                 evt = self.controller.anomalyActionQueue.get()
                 if evt is None:
                     self.controller.anomalyActionQueue.task_done()
+                    #self.controller.archiveQueue.put(None)  # Signal to archive queue to stop
                     break
             except queue.Empty:
                 continue
@@ -86,24 +88,25 @@ class LogCollectionManager:
                 f"[Log Collector][manager] Handling anomaly type '{anomaly_type}' for batch {batch_id}"
             )
             for action in self.anomaly_actions.get(anomaly_type, []):
-                if isinstance(action, ToolManager):
-                    print(
-                        f"[Log Collector][manager] Extending tool manager for {action.output_subdir} batch {batch_id}"
-                    )
-                    action.extend(batch_id)
-                else:
-                    if not any_quick_action:
-                        # create the in progress marker
-                        quick_dir = os.path.join(self.batches_root, f"aod_{batch_id}", "quick")
-                        os.makedirs(quick_dir, exist_ok=True)
-                        in_progress = os.path.join(quick_dir, ".IN_PROGRESS")
-                        open(in_progress, "w").close()
-                        any_quick_action = True
-                        quick_actions = []
+                # FOR NOW CODE ONLY HANDLES QUICK ACTIONS
+                # if isinstance(action, ToolManager):
+                #     print(
+                #         f"[Log Collector][manager] Extending tool manager for {action.output_subdir} batch {batch_id}"
+                #     )
+                #     action.extend(batch_id)
+                # else:
+                if not any_quick_action:
+                    # create the in progress marker
+                    quick_dir = os.path.join(self.batches_root, f"aod_{batch_id}", "quick")
+                    os.makedirs(quick_dir, exist_ok=True)
+                    in_progress = os.path.join(quick_dir, ".IN_PROGRESS")
+                    open(in_progress, "w", encoding="utf-8").close()
+                    any_quick_action = True
+                    quick_actions = []
                     print(
                         f"[Log Collector][manager] Submitting quick action {action.__class__.__name__} for batch {batch_id}"
                     )
-                    quick_actions.append(self.quick_actions_pool.submit(action.execute, batch_id))
+                quick_actions.append(self.quick_actions_pool.submit(action.execute, batch_id))
             if any_quick_action:
                 concurrent.futures.wait(quick_actions, return_when=concurrent.futures.ALL_COMPLETED)
                 completed = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", ".COMPLETE")
@@ -114,7 +117,6 @@ class LogCollectionManager:
                     f"[Log Collector][manager] Adding quick actions for batch {batch_id} to archive queue"
                 )
                 quick_output_dir = os.path.join(self.batches_root, f"aod_{batch_id}", "quick")
-                self.controller.archiveQueue.put(quick_output_dir)
                 any_quick_action = False
                 quick_actions = []
             self.controller.anomalyActionQueue.task_done()
@@ -122,5 +124,3 @@ class LogCollectionManager:
     def stop(self) -> None:
         print("[Log Collector][manager] Stopping LogCollectorManager and all tool managers")
         self.quick_actions_pool.shutdown(wait=True)
-        self.tcpdump_manager.stop_all()
-        self.trace_manager.stop_all()
