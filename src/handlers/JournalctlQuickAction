@@ -1,0 +1,32 @@
+"""Journalctl quick action for log collection."""
+
+import os
+import subprocess
+from base.QuickAction import QuickAction
+
+
+class JournalctlQuickAction(QuickAction):
+    """ Collect journalctl logs from anomaly_interval seconds ago"""
+
+    def __init__(self, params: dict):
+        super().__init__(params, "journalctl.log")
+        self.anomaly_interval = params.get("anomaly_interval", 1)
+
+    def execute(self, batch_id: str):
+        """Execute the journalctl log collection."""
+        output_path = self.get_output_dir(batch_id)
+        print(
+            f"[Log Collector][journalctl] Collecting journalctl logs for batch {batch_id} at {output_path}"
+        )
+        with open(output_path, "w") as f:
+            subprocess.run(
+                [
+                    "journalctl",
+                    "--since",
+                    f"{self.anomaly_interval} seconds ago",
+                ],
+                stdout=f,
+            )
+        print(
+            f"[Log Collector][journalctl] Finished writing journalctl logs for batch {batch_id} at {output_path}"
+        )

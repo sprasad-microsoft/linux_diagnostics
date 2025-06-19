@@ -16,6 +16,7 @@ class LogCompressor:
             try:
                 output_subdir = self.controller.archiveQueue.get()
                 if output_subdir is None:
+                    self.controller.archiveQueue.task_done()
                     break  # Exit loop on sentinel
                 self.compression_pool.submit(self._compress, output_subdir)
                 print(f"[Log Compressor] Compressed logs for directory: {output_subdir}")

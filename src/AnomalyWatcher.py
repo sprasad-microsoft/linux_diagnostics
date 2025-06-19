@@ -70,7 +70,7 @@ class AnomalyWatcher:
                     next_batch = self.controller.eventQueue.get_nowait()
                     if next_batch is None:
                         self.controller.eventQueue.task_done()
-                        return  # Exit the run method immediately on sentinel
+                        break  # Exit inner loop immediately on sentinel
                     batch = np.concatenate((batch, next_batch))
                     self.controller.eventQueue.task_done()
                 except queue.Empty:
@@ -84,6 +84,7 @@ class AnomalyWatcher:
                     self.controller.anomalyActionQueue.put(action)
 
             self.controller.eventQueue.task_done()
+            print("event queue done")
             time.sleep(self.interval)
 
     def _generate_action(self, anomaly_type: AnomalyType) -> dict:

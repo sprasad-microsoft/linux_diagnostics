@@ -24,7 +24,7 @@ class LatencyAnomalyHandler(AnomalyHandler):
 
     # works only if ebpf code does filtering as per config file (i.e. ignore excluded cmds)
     def detect(self, events_batch: np.ndarray) -> bool:
-
+        """ Returns true if we detect many cmds crossing thresholds or a single cmd crossing 1 second """
         anomaly_count = np.sum(
             (events_batch["metric_latency_ns"] >= self.threshold_lookup[events_batch["smbcommand"]])
         )

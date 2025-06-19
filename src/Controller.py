@@ -123,6 +123,12 @@ class Controller:
         self.anomalyActionQueue.put(None)  # Sentinel to stop AnomalyWatcher
         self.archiveQueue.put(None)  # Sentinel to stop LogCompressor
         self.auditQueue.put(None)  # Sentinel to stop AuditLogger
+        
+        # Wait for all items to be processed
+        self.eventQueue.join()
+        self.anomalyActionQueue.join()
+        self.archiveQueue.join()
+        self.auditQueue.join()
 
         for thread in self.threads:
             thread.join(timeout=5)
@@ -166,6 +172,7 @@ class Controller:
         self._supervise_thread("SpaceWatcher", self.space_watcher.run)
         self.stop_event.wait()
         self._shutdown()
+
 
 def handle_signal(controller, signum, frame):
     """Handle termination signals to gracefully shut down the controller."""

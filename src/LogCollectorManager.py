@@ -468,6 +468,7 @@ class LogCollectorManager:
                 print("[Log Collector][manager] Waiting for events in anomalyActionQueue")
                 evt = self.controller.anomalyActionQueue.get()
                 if evt is None:
+                    self.controller.anomalyActionQueue.task_done()
                     break
             except queue.Empty:
                 continue

@@ -11,6 +11,7 @@ class AuditLogger:
             try:
                 record = self.controller.auditQueue.get()
                 if record is None:
+                    self.controller.auditQueue.task_done()
                     break  # Exit loop on sentinel
                 print(f"Logged audit record: {record}")
                 self.controller.auditQueue.task_done()
