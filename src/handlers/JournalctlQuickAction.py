@@ -1,3 +1,5 @@
+
+
 from base.QuickAction import QuickAction
 
 class JournalctlQuickAction(QuickAction):

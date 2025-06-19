@@ -22,7 +22,7 @@ class QuickAction(ABC):
         """Return the command to run as a list."""
 
     def execute(self, batch_id: str) -> None:
-        """Common log collection logic."""
+        """Run process to collect logs."""
         output_path = self.get_output_dir(batch_id)
         try:
             with open(output_path, "w", encoding="utf-8") as f:
@@ -34,4 +34,3 @@ class QuickAction(ABC):
         except subprocess.CalledProcessError as exc:
             print(f"[{self.__class__.__name__}] Error running command: {exc}")
         print(f"[{self.__class__.__name__}] Finished writing logs for batch {batch_id} at {output_path}")
-

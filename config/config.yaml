@@ -7,7 +7,7 @@ watcher:
     - dmesg
     - journalctl
     - debugdata
-    - stats
+    - stats         # I'm assuming this refers to cifs stats
 
 guardian:
   anomalies:
@@ -25,6 +25,12 @@ guardian:
       actions:
         - dmesg
         - journalctl           # can add another eBPF tool to trigger here too
+        - debugdata
+        - stats
+        - mount
+        - smbinfo
+        - syslogs
+
 
     # Refer to the note below for more info
     latency:
