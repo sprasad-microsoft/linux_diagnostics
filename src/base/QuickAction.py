@@ -3,8 +3,10 @@
 import os
 from abc import ABC, abstractmethod
 
+
 class QuickAction(ABC):
     """Base class for quick actions in the log collection process."""
+
     def __init__(self, params: dict, log_filename: str):
         self.params = params
         self.batches_root = params.get("batches_root", "")

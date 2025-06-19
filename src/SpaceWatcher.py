@@ -33,7 +33,7 @@ class SpaceWatcher:
             time.sleep(self.cleanup_interval)
 
     def _full_cleanup_needed(self) -> bool:
-        """Check if current time  > last_full_cleanup + max_age"""
+        """Check if current time  > last_full_cleanup + max_age."""
         current_time = time.time()
         if (
             current_time - self.last_full_cleanup > self.max_age * 24 * 60 * 60
@@ -79,7 +79,10 @@ class SpaceWatcher:
         completed_batches = []
         in_progress_batches = []
         batch_size_map = {}
+        batch_time_map = {}
         for batch_dir in self.batches_root.iterdir():
+
+            batch_time_map[batch_dir] = batch_dir.stat().st_mtime
 
             if not batch_dir.is_dir():
                 batch_size_map[batch_dir] = batch_dir.stat().st_size
@@ -117,19 +120,21 @@ class SpaceWatcher:
                     continue
             # If no .IN_PROGRESS found, add batch_dir
             completed_batches.append(batch_dir)
-        return completed_batches, in_progress_batches, batch_size_map
+        return completed_batches, in_progress_batches, batch_size_map, batch_time_map
 
     # rewrite so that u only delete directories created by AOD
     def cleanup_by_size(self) -> None:
-        """Delete largest completed batch directories or files until total size is under max_size."""
-        comp_batches, in_progress_batches, batch_size_map = self._get_completed_aod_batches()
+        """Delete oldest files first until total size
+        is under max_size."""
+        comp_batches, in_progress_batches, batch_size_map, batch_time_map = self._get_completed_aod_batches()
         if not comp_batches and not in_progress_batches:
             print("[SpaceWatcher] No eligible batches to cleanup by size.")
             return
         comp_batches = np.array(comp_batches)
         batch_size_map = np.vectorize(batch_size_map.get)
+        batch_time_map = np.vectorize(batch_time_map.get)
 
-        sorted_batches = comp_batches[np.argsort(-1 * batch_size_map(comp_batches))]
+        sorted_batches = comp_batches[np.argsort(batch_time_map(comp_batches))]
         total_size = sum(f.stat().st_size for f in self.batches_root.glob("**/*") if f.is_file())
         max_bytes = self.max_size * 1024 * 1024
         print(

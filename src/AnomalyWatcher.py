@@ -1,7 +1,5 @@
-"""
-Anomaly Watcher Module
-Monitors events and triggers anomaly detection handlers.
-"""
+"""Anomaly Watcher Module Monitors events and triggers anomaly detection
+handlers."""
 
 import queue
 import time
@@ -22,10 +20,12 @@ ANOMALY_HANDLER_REGISTRY = {
 
 
 class AnomalyWatcher:
-    """
-    Registers its own tail in eventQueue. It sleeps for an interval (specified in the config), wakes up and drains the queue.
-    It computes the masks to separate events for each anomaly type and conducts anomaly analysis.
-    Queues the anomaly action type to the anomalyActionQueue.
+    """Registers its own tail in eventQueue.
+
+    It sleeps for an interval (specified in the config), wakes up and
+    drains the queue. It computes the masks to separate events for each
+    anomaly type and conducts anomaly analysis. Queues the anomaly
+    action type to the anomalyActionQueue.
     """
 
     def __init__(self, controller):
@@ -84,7 +84,6 @@ class AnomalyWatcher:
                     self.controller.anomalyActionQueue.put(action)
 
             self.controller.eventQueue.task_done()
-            print("event queue done")
             time.sleep(self.interval)
 
     def _generate_action(self, anomaly_type: AnomalyType) -> dict:

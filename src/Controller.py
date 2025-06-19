@@ -1,7 +1,7 @@
-"""
-Main controller module for the AODv2 service.
-Responsible for orchestrating startup, configuration, process supervision,
-and graceful shutdown of all service components.
+"""Main controller module for the AODv2 service.
+
+Responsible for orchestrating startup, configuration, process
+supervision, and graceful shutdown of all service components.
 """
 
 import threading
@@ -27,7 +27,8 @@ class Controller:
     """Main controller class for the AODv2 service."""
 
     def __init__(self, config_path: str):
-        """Manages configuration, starts and supervises all service components, and coordinates graceful shutdown."""
+        """Manages configuration, starts and supervises all service components,
+        and coordinates graceful shutdown."""
         self.stop_event = threading.Event()
         self.config = ConfigManager(config_path).data
         self.threads = []
@@ -50,7 +51,8 @@ class Controller:
         self.anomaly_watcher = AnomalyWatcher(self)
 
     def _supervise_thread(self, thread_name: str, target: callable, *args, **kwargs) -> None:
-        """Start and supervise a thread, restarting it if it dies unexpectedly."""
+        """Start and supervise a thread, restarting it if it dies
+        unexpectedly."""
 
         def runner():
             while not self.stop_event.is_set():
@@ -90,7 +92,8 @@ class Controller:
             time.sleep(1)
 
     def _get_smbsloweraod_args(self) -> tuple[int, str]:
-        """Get arguments for the smbsloweraod process based on the latency anomaly config."""
+        """Get arguments for the smbsloweraod process based on the latency
+        anomaly config."""
         latency_anomaly = self.config.guardian.anomalies.get("latency")
         if latency_anomaly is None:
             return 10, list(ALL_SMB_CMDS.values())  # Default threshold is 10
@@ -123,7 +126,7 @@ class Controller:
         self.anomalyActionQueue.put(None)  # Sentinel to stop AnomalyWatcher
         self.archiveQueue.put(None)  # Sentinel to stop LogCompressor
         self.auditQueue.put(None)  # Sentinel to stop AuditLogger
-        
+
         # Wait for all items to be processed
         self.eventQueue.join()
         self.anomalyActionQueue.join()

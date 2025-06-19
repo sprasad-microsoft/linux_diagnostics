@@ -1,12 +1,11 @@
 """Journalctl quick action for log collection."""
 
-import os
 import subprocess
 from base.QuickAction import QuickAction
 
 
 class JournalctlQuickAction(QuickAction):
-    """ Collect journalctl logs from anomaly_interval seconds ago"""
+    """Collect journalctl logs from anomaly_interval seconds ago."""
 
     def __init__(self, params: dict):
         super().__init__(params, "journalctl.log")

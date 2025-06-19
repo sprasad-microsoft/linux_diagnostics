@@ -1,6 +1,4 @@
-"""
-Data shared between multiple aod componenets.
-"""
+"""Data shared between multiple aod componenets."""
 
 import ctypes
 import errno
@@ -55,7 +53,7 @@ class Metrics(ctypes.Union):
 
 
 class Event(ctypes.Structure):
-    """Event c struct"""
+    """Event c struct."""
 
     _fields_ = [
         ("pid", ctypes.c_int),

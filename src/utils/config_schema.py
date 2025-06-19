@@ -6,7 +6,8 @@ from typing import Optional
 
 @dataclass(slots=True, frozen=True)
 class AnomalyConfig:
-    """AnomalyConfig is a dataclass that defines the configuration for an anomaly detection tool."""
+    """AnomalyConfig is a dataclass that defines the configuration for an
+    anomaly detection tool."""
 
     type: str
     tool: str
@@ -18,14 +19,15 @@ class AnomalyConfig:
 
 @dataclass(slots=True, frozen=True)
 class GuardianConfig:
-    """GuardianConfig will tell which anomalies to detect and how to handle them."""
+    """GuardianConfig will tell which anomalies to detect and how to handle
+    them."""
 
     anomalies: dict[str, AnomalyConfig]
 
 
 @dataclass(slots=True, frozen=True)
 class WatcherConfig:
-    """WatcherConfig will tell which actions to be taken"""
+    """WatcherConfig will tell which actions to be taken."""
 
     actions: list[str]
 

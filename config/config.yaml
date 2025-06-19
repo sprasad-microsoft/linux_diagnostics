@@ -47,7 +47,7 @@ guardian:
 cleanup:
   cleanup_interval_sec: 60     # Interval in seconds to run cleanup
   max_log_age_days: 2          # Maximum age of logs in days
-  max_total_log_size_mb: 200   # Maximum total size of all logs in MB
+  max_total_log_size_mb: 200  # Maximum total size of all logs in MB
 
 audit:
   enabled: true

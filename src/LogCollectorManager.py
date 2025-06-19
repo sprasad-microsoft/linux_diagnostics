@@ -246,7 +246,8 @@ class ToolManager(ABC):
         self.running_batch_id = batch_id
 
     def _create_symlink_to_running_batch(self, batch_id: str):
-        """Create a symlink in the current batch's output dir pointing to the running batch's output dir."""
+        """Create a symlink in the current batch's output dir pointing to the
+        running batch's output dir."""
         if self.running_batch_id is None or self.running_batch_id == batch_id:
             print(
                 f"[Log Collector][{self.tool_name()}] No other running batch to symlink for batch {batch_id}"

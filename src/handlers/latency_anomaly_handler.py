@@ -1,7 +1,5 @@
-"""
-Latency Anomaly Handler
-This handler detects latency anomalies based on predefined thresholds for SMB commands.
-"""
+"""Latency Anomaly Handler This handler detects latency anomalies based on
+predefined thresholds for SMB commands."""
 
 import numpy as np
 from base.anomaly_handler_base import AnomalyHandler
@@ -10,9 +8,8 @@ from shared_data import ALL_SMB_CMDS
 
 # works only if ebpf code does filtering as per config file (i.e. ignore excluded cmds)
 class LatencyAnomalyHandler(AnomalyHandler):
-    """
-    Checks if a batch of events has any latency anomalies based on the thresholds defined in the config.
-    """
+    """Checks if a batch of events has any latency anomalies based on the
+    thresholds defined in the config."""
 
     def __init__(self, latency_config):
         super().__init__(latency_config)
@@ -24,7 +21,8 @@ class LatencyAnomalyHandler(AnomalyHandler):
 
     # works only if ebpf code does filtering as per config file (i.e. ignore excluded cmds)
     def detect(self, events_batch: np.ndarray) -> bool:
-        """ Returns true if we detect many cmds crossing thresholds or a single cmd crossing 1 second """
+        """Returns true if we detect many cmds crossing thresholds or a single
+        cmd crossing 1 second."""
         anomaly_count = np.sum(
             (events_batch["metric_latency_ns"] >= self.threshold_lookup[events_batch["smbcommand"]])
         )

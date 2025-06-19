@@ -1,6 +1,5 @@
-"""
-Handles reading events from shared memory, batching them, and dispatching to the controller's event queue.
-"""
+"""Handles reading events from shared memory, batching them, and dispatching to
+the controller's event queue."""
 
 # import ctypes
 import os
@@ -19,21 +18,20 @@ from shared_data import SHM_NAME, SHM_SIZE, SHM_DATA_SIZE, HEAD_TAIL_BYTES, even
 
 
 class EventDispatcher:
-    """
-    Polls C ring buffer and drains all events. Parses the raw c struct to Python numpy struct array and sends it to eventQueue.
+    """Polls C ring buffer and drains all events.
+
+    Parses the raw c struct to Python numpy struct array and sends it to
+    eventQueue.
     """
 
     def __init__(self, controller):
-        """
-        Initialize the EventDispatcher.
-        """
+        """Initialize the EventDispatcher."""
         self.controller = controller
         self.head_tail_fmt = "<Q" if HEAD_TAIL_BYTES == 8 else "<I"
         self.shm_fd, self.shm_map = self._setup_shared_memory()
 
     def _setup_shared_memory(self) -> tuple[int, mmap.mmap]:
-        """
-        Open, create, size, and memory-map the shared memory segment.
+        """Open, create, size, and memory-map the shared memory segment.
 
         Returns:
             Tuple[int, mmap.mmap]: The file descriptor and mmap object.

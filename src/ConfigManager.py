@@ -8,15 +8,13 @@ from utils.config_schema import Config, WatcherConfig, GuardianConfig, AnomalyCo
 
 
 class ConfigManager:
-    """
-    Loads and parses the YAML configuration file, validates anomaly and watcher settings,
-    and constructs the top-level configuration object for the diagnostics service.
-    """
+    """Loads and parses the YAML configuration file, validates anomaly and
+    watcher settings, and constructs the top-level configuration object for the
+    diagnostics service."""
 
     def __init__(self, config_path: str):
-        """
-        Initializes the ConfigManager by loading and parsing the configuration file.
-        """
+        """Initializes the ConfigManager by loading and parsing the
+        configuration file."""
         config_data = self._load_yaml(config_path)
         watcher = self._parse_watcher(config_data)
         guardian = self._parse_guardian(config_data)
@@ -56,7 +54,8 @@ class ConfigManager:
         return GuardianConfig(anomalies=anomalies)
 
     def _get_track_for_anomaly(self, anomaly: dict):
-        """Dispatch to the correct track extraction function based on anomaly type using Enum."""
+        """Dispatch to the correct track extraction function based on anomaly
+        type using Enum."""
         anomaly_type_str = anomaly["type"].strip().lower()
         try:
             anomaly_type = AnomalyType(anomaly_type_str)
@@ -85,7 +84,8 @@ class ConfigManager:
         )
 
     def _check_codes(self, codes, all_codes, code_type):
-        """Check that codes are present in all_codes, not duplicated, and not empty."""
+        """Check that codes are present in all_codes, not duplicated, and not
+        empty."""
         seen = set()
         for code in codes:
             if code not in all_codes:
@@ -95,7 +95,8 @@ class ConfigManager:
             seen.add(code)
 
     def _validate_cmds(self, all_codes, track_codes, exclude_codes):
-        """Validate that track and exclude codes/cmds are present, not duplicated, and not overlapping."""
+        """Validate that track and exclude codes/cmds are present, not
+        duplicated, and not overlapping."""
 
         # check if any track_codes are duplicated
         self._check_codes(track_codes, all_codes, "track codes")
@@ -111,9 +112,8 @@ class ConfigManager:
                 )
 
     def _validate_smb_thresholds(self, track_commands):
-        """
-        Check that all thresholds in track_commands are valid (int/float and >= 0).
-        """
+        """Check that all thresholds in track_commands are valid (int/float and
+        >= 0)."""
         for command in track_commands or []:
             if "threshold" in command:
                 threshold = command["threshold"]
@@ -121,10 +121,10 @@ class ConfigManager:
                     raise ValueError(f"Invalid threshold value in track command: {command}")
 
     def _validate_smb_commands(self, track_commands, exclude_commands):
-        """
-        Validate SMB commands for tracking and exclusion.
-        Checks for duplicates and presence using validate_cmds,
-        and checks threshold validity using a separate function.
+        """Validate SMB commands for tracking and exclusion.
+
+        Checks for duplicates and presence using validate_cmds, and
+        checks threshold validity using a separate function.
         """
         # Extract command names from track_commands (list of dicts)
         track_cmd_names = [cmd["command"] for cmd in (track_commands or []) if "command" in cmd]
@@ -150,8 +150,8 @@ class ConfigManager:
     def _normalize_track_and_exclude(
         self, mode: str, track_items, exclude_items, anomaly_type: str = "anomaly"
     ):
-        """
-        Normalize track and exclude items based on the mode.
+        """Normalize track and exclude items based on the mode.
+
         Warns and clears the irrelevant list if needed.
         """
         if mode == "trackonly" and exclude_items:
@@ -167,9 +167,7 @@ class ConfigManager:
         return track_items, exclude_items
 
     def _build_latency_command_map(self, mode, track_commands, exclude_commands, default_threshold):
-        """
-        Build the command map for latency anomaly detection.
-        """
+        """Build the command map for latency anomaly detection."""
 
         def get_threshold(cmd_dict):
             return cmd_dict.get("threshold", default_threshold)
@@ -197,7 +195,8 @@ class ConfigManager:
         return command_map
 
     def _get_latency_track_cmds(self, anomaly):
-        """Parse and validate latency anomaly tracking commands from the config."""
+        """Parse and validate latency anomaly tracking commands from the
+        config."""
         track_commands = anomaly.get("track_commands", []) or []
         exclude_commands = anomaly.get("exclude_commands", []) or []
         latency_mode = anomaly.get("mode", "all")
@@ -217,7 +216,8 @@ class ConfigManager:
         )
 
     def _get_error_track_cmds(self, anomaly):
-        """Parse and validate latency anomaly tracking commands from the config."""
+        """Parse and validate latency anomaly tracking commands from the
+        config."""
         track_codes = anomaly.get("track_codes", [])
         exclude_codes = anomaly.get("exclude_codes", [])
         error_mode = anomaly.get("mode", "all")
