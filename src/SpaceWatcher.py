@@ -7,7 +7,6 @@ from pathlib import Path
 import numpy as np
 
 SIZE_DELETE_THRESHOLD = 0.5
-IN_PROGRESS_DELETE_THRESHOLD = 0.8
 
 class SpaceWatcher:
     """Wake up every 10 minutes and check the size of the output dir. 
@@ -57,124 +56,63 @@ class SpaceWatcher:
         return False
 
     def cleanup_by_age(self) -> None:
-        """Delete batch directories or files older than max_log_age_days days."""
+        """Delete batch directories or files older than max_log_age_days days using numpy for efficiency."""
         cutoff = time.time() - self.max_log_age_days * 24 * 60 * 60
-        # trying to ensure that we only delete directories created by AOD
-        # for now we are assuming user wont create directories starting with "aod_"
-        old_batches_to_delete = [
-            d
-            for d in self.batches_dir.iterdir()
-            if d.is_dir() and d.name.startswith("aod_") and d.stat().st_mtime < cutoff
-        ]
-        if not old_batches_to_delete:
+        entries = list(self.batches_dir.glob("aod_*"))
+        if not entries:
             print("[SpaceWatcher] No AOD batch entries to cleanup by age.")
             return
+
+        # Filter entries that are older than the cutoffs
+        entries = np.array(entries)
+        to_delete = entries[np.array([e.stat().st_mtime for e in entries]) < cutoff]
+
+        if len(to_delete) == 0:
+            print("[SpaceWatcher] No AOD batch entries to cleanup by age.")
+            return
+
         deleted_count = 0
-        for entry in old_batches_to_delete:
+        for entry in to_delete:
             try:
-                shutil.rmtree(entry)
+                shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
                 deleted_count += 1
                 print(f"[SpaceWatcher] Deleted old batch entry {entry}")
             except (FileNotFoundError, PermissionError, OSError) as e:
                 print(f"[SpaceWatcher] Failed to delete {entry}: {e}")
         print(f"[SpaceWatcher] Age-based cleanup complete. Deleted {deleted_count} batch entries.")
 
-    def _get_completed_aod_batches(self):
-        completed_batches = []
-        in_progress_batches = []
-        batch_size_map = {}
-        batch_time_map = {}
-        for batch_dir in self.batches_dir.iterdir():
-
-            batch_time_map[batch_dir] = batch_dir.stat().st_mtime
-
-            if not batch_dir.is_dir():
-                batch_size_map[batch_dir] = batch_dir.stat().st_size
-                continue
-
-            batch_size_map[batch_dir] = sum(
-                f.stat().st_size for f in batch_dir.glob("**/*") if f.is_file()
-            )
-
-            if not batch_dir.name.startswith("aod_"):
-                continue
-
-            # Check quick/.IN_PROGRESS
-            quick_dir = batch_dir / "quick"
-            if quick_dir.exists() and (quick_dir / ".IN_PROGRESS").exists():
-                print(
-                    f"[SpaceWatcher] Giving lower delete priority to {batch_dir} due to .IN_PROGRESS in quick directory"
-                )
-                in_progress_batches.append(batch_dir)
-                continue
-
-            # Check live/<tool>/.IN_PROGRESS
-            live_dir = batch_dir / "live"
-            if live_dir.exists():
-                in_progress_found = False
-                for tool_dir in live_dir.iterdir():
-                    if tool_dir.is_dir() and (tool_dir / ".IN_PROGRESS").exists():
-                        print(
-                            f"[SpaceWatcher] Giving lower delete priority to {batch_dir} due to .IN_PROGRESS in live/{tool_dir.name} directory"
-                        )
-                        in_progress_found = True
-                        break
-                if in_progress_found:
-                    in_progress_batches.append(batch_dir)
-                    continue
-            # If no .IN_PROGRESS found, add batch_dir
-            completed_batches.append(batch_dir)
-        return completed_batches, in_progress_batches, batch_size_map, batch_time_map
-
-    # rewrite so that u only delete directories created by AOD
     def cleanup_by_size(self) -> None:
-        """Delete oldest files first until total size
-        is under max_total_log_suze_mb."""
-        completed_batches, in_progress_batches, batch_size_map, batch_time_map = self._get_completed_aod_batches()
-        if not completed_batches and not in_progress_batches:
-            print("[SpaceWatcher] No eligible batches to cleanup by size.")
+        """Delete oldest files or directories starting with aod_ until total size is under max_total_log_suze_mb."""
+        entries = list(self.batches_dir.glob("aod_*"))
+        if not entries:
+            print("[SpaceWatcher] No eligible AOD entries to cleanup by size.")
             return
-        completed_batches = np.array(completed_batches)
-        batch_size_map = np.vectorize(batch_size_map.get)
-        batch_time_map = np.vectorize(batch_time_map.get)
 
-        sorted_batches = completed_batches[np.argsort(batch_time_map(completed_batches))]
-        total_size = sum(f.stat().st_size for f in self.batches_dir.glob("**/*") if f.is_file())
+        # Sort entries by modification time (oldest first)
+        entries = np.array(entries)
+        entries = entries[np.argsort([e.stat().st_mtime for e in entries])]
+
+        # Calculate sizes
+        def entry_size(e):
+            return e.stat().st_size if e.is_file() else sum(f.stat().st_size for f in e.glob("**/*") if f.is_file())
+
+        total_size = sum(entry_size(e) for e in entries)
         max_allowed_bytes = self.max_total_log_suze_mb * 1024 * 1024
         print(
-            f"[SpaceWatcher] Total size of batches: {total_size / (1024 * 1024):.2f} MB, max allowed: {self.max_total_log_suze_mb} MB"
+            f"[SpaceWatcher] Total size of AOD entries: {total_size / (1024 * 1024):.2f} MB, max allowed: {self.max_total_log_suze_mb} MB"
         )
 
         deleted_count = 0
-        # first check if deleting completed batches suffices
-        for batch in sorted_batches:
+        for entry in entries:
             if total_size <= max_allowed_bytes * SIZE_DELETE_THRESHOLD:
                 break
-            batch_sz = batch_size_map(batch)
+            size = entry_size(entry)
             try:
-                shutil.rmtree(batch)
-                total_size -= batch_sz
+                shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
+                total_size -= size
                 deleted_count += 1
-                #print(f"[SpaceWatcher] Deleted batch {batch} ({batch_sz} bytes)")
+                print(f"[SpaceWatcher] Deleted entry {entry} ({size / 1024:.1f} KB)")
             except (FileNotFoundError, PermissionError, OSError) as e:
-                print(f"[SpaceWatcher] Failed to delete {batch}: {e}")
+                print(f"[SpaceWatcher] Failed to delete {entry}: {e}")
 
-        # if still above threshold, delete in-progress batches
-        if total_size > max_allowed_bytes * IN_PROGRESS_DELETE_THRESHOLD:
-            in_progress_batches = np.array(in_progress_batches)
-            sorted_in_progress = in_progress_batches[
-                np.argsort(-1 * batch_size_map(in_progress_batches))
-            ]
-            for batch in sorted_in_progress:
-                if total_size <= max_allowed_bytes * IN_PROGRESS_DELETE_THRESHOLD:
-                    break
-                batch_sz = batch_size_map(batch)
-                try:
-                    shutil.rmtree(batch)
-                    total_size -= batch_sz
-                    deleted_count += 1
-                    #print(f"[SpaceWatcher] Deleted in-progress batch {batch} ({batch_sz} bytes)")
-                except (FileNotFoundError, PermissionError, OSError) as e:
-                    print(f"[SpaceWatcher] Failed to delete {batch}: {e}")
-
-        print(f"[SpaceWatcher] Size-based cleanup complete. Deleted {deleted_count} batches. Total size now: {total_size / (1024 * 1024):.2f} MB")
+        print(f"[SpaceWatcher] Size-based cleanup complete. Deleted {deleted_count} entries. Total size now: {total_size / (1024 * 1024):.2f} MB")
