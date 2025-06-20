@@ -127,8 +127,6 @@ class Controller:
 
         if hasattr(self, "event_dispatcher"):
             self.event_dispatcher.cleanup()
-        if hasattr(self, "log_collector_manager"):
-            self.log_collector_manager.stop()
         # if hasattr(self, "space_watcher"):
         #     self.space_watcher.cleanup_by_size()
 

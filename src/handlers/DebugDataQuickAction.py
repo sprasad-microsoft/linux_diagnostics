@@ -9,9 +9,9 @@ class DebugDataQuickAction(QuickAction):
         """
         super().__init__(batches_root, "debug_data.log")
 
-    def get_command(self) -> list:
+    def get_command(self) -> tuple[list[str], str]:
         """returns cat /proc/fs/cifs/DebugData."""
         return [
             "cat",
             "/proc/fs/cifs/DebugData",
-        ]
+        ], "cat"

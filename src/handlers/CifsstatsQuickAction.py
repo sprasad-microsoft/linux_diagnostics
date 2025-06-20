@@ -7,8 +7,8 @@ class CifsstatsQuickAction(QuickAction):
         """
         super().__init__(batches_root, "cifsstats.log")
 
-    def get_command(self) -> list:
+    def get_command(self) -> tuple[list[str], str]:
         return [
             "cat",
             "/proc/fs/cifs/Stats",
-        ]
+        ], "cat"

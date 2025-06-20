@@ -12,9 +12,9 @@ class JournalctlQuickAction(QuickAction):
         super().__init__(batches_root, "journalctl.log")
         self.anomaly_interval = anomaly_interval
 
-    def get_command(self) -> list:
+    def get_command(self) -> tuple[list[str], str] :
         return [
             "journalctl",
             "--since",
             f"{self.anomaly_interval} seconds ago",
-        ]
+        ], "cmd"

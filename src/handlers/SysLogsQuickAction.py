@@ -14,4 +14,4 @@ class SysLogsQuickAction(QuickAction):
             "tail",
             f"-n{self.num_lines}",
             "/var/log/syslog",
-        ]
+        ], "cmd"

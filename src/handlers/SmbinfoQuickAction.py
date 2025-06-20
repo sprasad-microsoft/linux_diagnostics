@@ -7,9 +7,9 @@ class SmbinfoQuickAction(QuickAction):
         """
         super().__init__(batches_root, "smbinfo.log")
 
-    def get_command(self) -> list:
+    def get_command(self) -> tuple[list[str], str]:
         return [
             "smbinfo",
             "-h",
             "filebasicinfo",
-        ]
+        ], "cmd"

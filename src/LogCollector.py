@@ -1,9 +1,9 @@
-"""When an anomaly is detected, this manager collects logs (runs quick actions)"""
-
-import os
+import asyncio
+from pathlib import Path
+import threading
 import queue
-import time
-import concurrent.futures
+import shutil
+import os
 
 from handlers.JournalctlQuickAction import JournalctlQuickAction
 from handlers.CifsstatsQuickAction import CifsstatsQuickAction
@@ -12,115 +12,101 @@ from handlers.DebugDataQuickAction import DebugDataQuickAction
 from handlers.MountsQuickAction import MountsQuickAction
 from handlers.SmbinfoQuickAction import SmbinfoQuickAction
 from handlers.SysLogsQuickAction import SysLogsQuickAction
+from utils.anomaly_type import AnomalyType
 
 class LogCollector:
-    """It consumes the anomalyActionQueue. 
-    For each anomaly event, it submits the quick log collection actions “QuickActions” to a bounded threadpool"""
-
     def __init__(self, controller):
+        self.loop = asyncio.new_event_loop()
+        self.max_concurrent_tasks = 4
         self.controller = controller
+        self.anomaly_interval = getattr(self.controller.config, "watch_interval_sec", 1)  # 1 second default
         self.aod_output_dir = getattr(self.controller.config, "aod_output_dir", "/var/log/aod")
-        self.batches_root = os.path.join(self.aod_output_dir, "batches")
-        self.anomaly_interval = getattr(self.controller.config, "watch_interval_sec", 1)
-        self.quick_actions_pool = concurrent.futures.ThreadPoolExecutor(max_workers=4)
-        self.params = {"batches_root": self.batches_root, "anomaly_interval": self.anomaly_interval}
+        self.aod_output_dir = os.path.join(self.aod_output_dir, "batches")
         self.action_factory = {
-            "journalctl": lambda: JournalctlQuickAction(self.params),
-            "stats": lambda: CifsstatsQuickAction(self.params),
-            "dmesg": lambda: DmesgQuickAction(self.params),
-            "debugdata": lambda: DebugDataQuickAction(self.params),
-            "mounts": lambda: MountsQuickAction(self.params),
-            "smbinfo": lambda: SmbinfoQuickAction(self.params),
-            "syslogs": lambda: SysLogsQuickAction(self.params),
+            "journalctl": lambda: JournalctlQuickAction(self.aod_output_dir, self.anomaly_interval),
+            "stats": lambda: CifsstatsQuickAction(self.aod_output_dir),
+            "debugdata": lambda: DebugDataQuickAction(self.aod_output_dir),
+            "dmesg": lambda: DmesgQuickAction(self.aod_output_dir, self.anomaly_interval),
+            "mounts": lambda: MountsQuickAction(self.aod_output_dir),
+            "smbinfo": lambda: SmbinfoQuickAction(self.aod_output_dir),
+            "syslogs": lambda: SysLogsQuickAction(self.aod_output_dir, num_lines=100),
         }
-        self.anomaly_actions = self.set_anomaly_actions()
+        self.handlers = self.get_anomaly_events(controller.config)
 
-    def set_anomaly_actions(self) -> dict:
+    def get_anomaly_events(self, config) -> dict:
         """
         Build a mapping from anomaly type to a list of action instances,
         using the 'actions' field from each anomaly config in the loaded config.
         """
-        anomaly_actions = {}
-        for anomaly_name, anomaly_cfg in self.controller.config.guardian.anomalies.items():
+        anomaly_events = {}
+        for anomaly_name, anomaly_cfg in config.guardian.anomalies.items():
             actions = []
-            for action_name in anomaly_cfg.actions:
+            for action_name in getattr(anomaly_cfg, "actions", []):
                 factory = self.action_factory.get(action_name)
                 if factory is not None:
                     actions.append(factory())
                 else:
-                    print(f"[LogCollectionManager] Warning: No factory for action '{action_name}' in anomaly '{anomaly_name}'")
-            anomaly_actions[anomaly_name] = actions
-        return anomaly_actions
-
-    def _ensure_batch_dir(self, evt) -> str:
-        batch_id = str(evt.get("batch_id", evt.get("timestamp", int(time.time()))))
-        batch_dir = os.path.join(self.batches_root, f"aod_{batch_id}")
-        os.makedirs(batch_dir, exist_ok=True)
-        print(f"[Log Collector][manager] Ensured batch directory exists: {batch_dir}")
-        return batch_id
-
-    def _log_to_syslog(self, evt: dict) -> None:
-        print(f"[Log Collector][manager] Logging anomaly to syslog: {evt}")
-
-    def run(self) -> None:
-        print("[Log Collector][manager] LogCollectorManager started running")
-        while not self.controller.stop_event.is_set():
-            try:
-                evt = self.controller.anomalyActionQueue.get()
-                if evt is None:
-                    self.controller.anomalyActionQueue.task_done()
-                    #self.controller.archiveQueue.put(None)  # Signal to archive queue to stop
-                    break
-            except queue.Empty:
-                continue
-            batch_id = self._ensure_batch_dir(evt)
-            self._log_to_syslog(evt)
-            anomaly_type = (
-                evt["anomaly"].name.lower()
-                if hasattr(evt.get("anomaly"), "name")
-                else str(evt.get("anomaly", "")).lower()
-            )
-
-            any_quick_action = False
-            quick_actions = []
-
-            print(
-                f"[Log Collector][manager] Handling anomaly type '{anomaly_type}' for batch {batch_id}"
-            )
-            for action in self.anomaly_actions.get(anomaly_type, []):
-                # FOR NOW CODE ONLY HANDLES QUICK ACTIONS
-                # if isinstance(action, ToolManager):
-                #     print(
-                #         f"[Log Collector][manager] Extending tool manager for {action.output_subdir} batch {batch_id}"
-                #     )
-                #     action.extend(batch_id)
-                # else:
-                if not any_quick_action:
-                    # create the in progress marker
-                    quick_dir = os.path.join(self.batches_root, f"aod_{batch_id}", "quick")
-                    os.makedirs(quick_dir, exist_ok=True)
-                    in_progress = os.path.join(quick_dir, ".IN_PROGRESS")
-                    open(in_progress, "w", encoding="utf-8").close()
-                    any_quick_action = True
-                    quick_actions = []
                     print(
-                        f"[Log Collector][manager] Submitting quick action {action.__class__.__name__} for batch {batch_id}"
+                        f"[LogCollector] Warning: No factory for action '{action_name}' in anomaly '{anomaly_name}'"
                     )
-                quick_actions.append(self.quick_actions_pool.submit(action.execute, batch_id))
-            if any_quick_action:
-                concurrent.futures.wait(quick_actions, return_when=concurrent.futures.ALL_COMPLETED)
-                completed = os.path.join(self.batches_root, f"aod_{batch_id}", "quick", ".COMPLETE")
-                if os.path.exists(in_progress):
-                    os.rename(in_progress, completed)
-                    print(f"[Log Collector][manager] Renamed {in_progress} to {completed}")
+            try:
+                anomaly_type_enum = AnomalyType(anomaly_cfg.type.strip().lower())
+                anomaly_events[anomaly_type_enum] = actions
+            except ValueError:
                 print(
-                    f"[Log Collector][manager] Adding quick actions for batch {batch_id} to archive queue"
+                    f"[LogCollector] Warning: Unknown anomaly type '{anomaly_cfg.type}' for '{anomaly_name}'"
                 )
-                quick_output_dir = os.path.join(self.batches_root, f"aod_{batch_id}", "quick")
-                any_quick_action = False
-                quick_actions = []
-            self.controller.anomalyActionQueue.task_done()
+        return anomaly_events
 
-    def stop(self) -> None:
-        print("[Log Collector][manager] Stopping LogCollectorManager and all tool managers")
-        self.quick_actions_pool.shutdown(wait=True)
+    async def _create_log_collection_task(self, anomaly_event) -> None:
+        """ here we wait for the logs to be collected.
+        After that, we should compress the logs. In reality, compression would
+        be offloaded to the compression worker thread. """
+        print(f"Collecting logs for anomaly event {anomaly_event}")
+        anomaly_type = anomaly_event["anomaly"]
+        batch_id = f"{anomaly_event["timestamp"]}"
+        await asyncio.gather(
+            *[handler.execute(batch_id) for handler in self.handlers[anomaly_type]]
+        )
+        output_path = self.handlers[anomaly_type][0].get_output_dir(batch_id)
+        shutil.make_archive(output_path, 'zip', output_path)
+        shutil.rmtree(output_path)
+
+    async def _create_log_collection_task_with_limit(self, anomaly_event, semaphore: asyncio.Semaphore) -> None:
+        # use the with ... statement so that we do not have to manually release the semaphore
+        async with semaphore:
+            try:
+                await self._create_log_collection_task(anomaly_event)
+            except Exception as e:
+                print(f"Error {e} while collecting logs for anomaly action {anomaly_event}")
+            finally:
+                # send a task done signal to the queue
+                await asyncio.to_thread(self.controller.anomalyActionQueue.task_done)
+
+    async def _run(self):
+        currently_running_tasks = set()
+        semaphore = asyncio.Semaphore(self.max_concurrent_tasks)
+
+        while True:
+            try:
+                print("Waiting for anomaly event...")
+                anomaly_event = await asyncio.to_thread(self.controller.anomalyActionQueue.get) # we can afford to block here since we send a poison pill when the script stops
+                if anomaly_event is None:  # Sentinel to stop the loop
+                    self.controller.anomalyActionQueue.task_done()
+                    # send sentinal to LogCompressor queue when integrated
+                    break
+                task = asyncio.create_task(self._create_log_collection_task_with_limit(anomaly_event, semaphore))
+                currently_running_tasks.add(task)
+                # remove task from the set when done
+                task.add_done_callback(currently_running_tasks.discard)
+            except Exception as e:
+                print(f"Error while processing anomaly event: {e}")
+            
+        if currently_running_tasks:
+            await asyncio.gather(*currently_running_tasks) # wait for all tasks to finish
+
+    def run(self):
+        # run forever
+        asyncio.set_event_loop(self.loop)
+        self.loop.run_until_complete(self._run()) # Runner.run() is meant for the main thread, so we use run_until_complete()
+        self.loop.close()
