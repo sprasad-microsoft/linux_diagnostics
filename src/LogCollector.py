@@ -89,7 +89,6 @@ class LogCollector:
 
         while True:
             try:
-                print("Waiting for anomaly event...")
                 anomaly_event = await asyncio.to_thread(self.controller.anomalyActionQueue.get) # we can afford to block here since we send a poison pill when the script stops
                 if anomaly_event is None:  # Sentinel to stop the loop
                     self.controller.anomalyActionQueue.task_done()

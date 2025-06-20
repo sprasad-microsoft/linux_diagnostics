@@ -13,12 +13,26 @@ from functools import partial
 import time
 import traceback
 
+
 from shared_data import ALL_SMB_CMDS
 from ConfigManager import ConfigManager
 from EventDispatcher import EventDispatcher
 from AnomalyWatcher import AnomalyWatcher
 from LogCollector import LogCollector
 from SpaceWatcher import SpaceWatcher
+
+import ctypes
+import ctypes.util
+
+def set_thread_name(name):
+    """Set thread name visible in htop when pressing H to show threads."""
+    try:
+        libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        # Limit name to 15 characters (Linux kernel limit)
+        name = name[:15].encode('utf-8')
+        libc.prctl(15, name, 0, 0, 0)  # PR_SET_NAME = 15
+    except Exception:
+        pass
 
 
 class Controller:
@@ -50,6 +64,7 @@ class Controller:
         unexpectedly."""
 
         def runner():
+            set_thread_name(thread_name) #only to view thread name in top
             while not self.stop_event.is_set():
                 try:
                     target(*args, **kwargs)
@@ -64,6 +79,7 @@ class Controller:
 
     def _supervise_process(self, process_name: str, start_func: callable) -> None:
         """Supervise a process, restarting it if it exits unexpectedly."""
+        set_thread_name("SmbslowerSupervisor") #only to view thread name in top
         while not self.stop_event.is_set():
             process = start_func()
             self.tool_processes[process_name] = process
@@ -139,6 +155,7 @@ class Controller:
 
     def run(self) -> None:
         """Start all supervisor threads and wait for shutdown."""
+        set_thread_name("Controller") #only to view thread name in top
         tool_names = self._extract_tools()
         for tool_name in tool_names:
             start_func = self.tool_starters.get(tool_name)
