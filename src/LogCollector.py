@@ -1,7 +1,5 @@
 import asyncio
-from pathlib import Path
-import threading
-import queue
+import tarfile
 import shutil
 import os
 
@@ -69,7 +67,10 @@ class LogCollector:
             *[handler.execute(batch_id) for handler in self.handlers[anomaly_type]]
         )
         output_path = self.handlers[anomaly_type][0].get_output_dir(batch_id)
-        shutil.make_archive(output_path, 'zip', output_path)
+        tar_path = f"{output_path}.tar.gz"
+        # Compress the logs using tar + gzip
+        with tarfile.open(tar_path, "w:gz") as tar:
+            tar.add(output_path, arcname=os.path.basename(output_path))
         shutil.rmtree(output_path)
 
     async def _create_log_collection_task_with_limit(self, anomaly_event, semaphore: asyncio.Semaphore) -> None:
