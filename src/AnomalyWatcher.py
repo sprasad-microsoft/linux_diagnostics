@@ -9,7 +9,7 @@ from shared_data import MAX_WAIT
 from utils.anomaly_type import AnomalyType, ANOMALY_TYPE_TO_TOOL_ID
 from handlers.latency_anomaly_handler import LatencyAnomalyHandler
 from handlers.error_anomaly_handler import ErrorAnomalyHandler
-from base.anomaly_handler_base import AnomalyHandler
+from base.AnomalyHandlerBase import AnomalyHandler
 
 # Maps enum to anomaly handler classes.
 ANOMALY_HANDLER_REGISTRY = {

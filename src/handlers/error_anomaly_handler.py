@@ -1,7 +1,7 @@
 """Error Anomaly Handler Module Will be added later."""
 
 import numpy as np
-from base.anomaly_handler_base import AnomalyHandler
+from base.AnomalyHandlerBase import AnomalyHandler
 
 
 class ErrorAnomalyHandler(AnomalyHandler):

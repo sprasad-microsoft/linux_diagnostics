@@ -12,6 +12,8 @@ import signal
 from functools import partial
 import time
 import traceback
+import ctypes
+import ctypes.util
 
 
 from shared_data import ALL_SMB_CMDS
@@ -21,8 +23,6 @@ from AnomalyWatcher import AnomalyWatcher
 from LogCollector import LogCollector
 from SpaceWatcher import SpaceWatcher
 
-import ctypes
-import ctypes.util
 
 def set_thread_name(name):
     """Set thread name visible in htop when pressing H to show threads."""

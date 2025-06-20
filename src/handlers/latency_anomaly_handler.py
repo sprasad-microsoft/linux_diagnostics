@@ -2,7 +2,7 @@
 predefined thresholds for SMB commands."""
 
 import numpy as np
-from base.anomaly_handler_base import AnomalyHandler
+from base.AnomalyHandlerBase import AnomalyHandler
 from shared_data import ALL_SMB_CMDS
 
 
