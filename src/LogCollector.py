@@ -29,7 +29,6 @@ class LogCollector:
         if __debug__:
             self.tasks_processed = 0
             self.tasks_failed = 0
-            self.start_time = time.time()
             logger.info("LogCollector initialized, output dir: %s", self.aod_output_dir)
         self.action_factory = {
             "journalctl": lambda: JournalctlQuickAction(self.aod_output_dir, self.anomaly_interval),
@@ -98,10 +97,9 @@ class LogCollector:
                 
                 # Log metrics every 10 tasks
                 if __debug__ and (self.tasks_processed + self.tasks_failed) % 10 == 0:
-                    runtime = time.time() - self.start_time
                     success_rate = (self.tasks_processed / (self.tasks_processed + self.tasks_failed) * 100) if (self.tasks_processed + self.tasks_failed) > 0 else 0
-                    logger.debug("LogCollector metrics: processed=%d, failed=%d, success_rate=%.1f%%, runtime=%.1fs", 
-                               self.tasks_processed, self.tasks_failed, success_rate, runtime)
+                    logger.debug("LogCollector metrics: processed=%d, failed=%d, success_rate=%.1f%%", 
+                               self.tasks_processed, self.tasks_failed, success_rate)
 
     async def _run(self):
         currently_running_tasks = set()

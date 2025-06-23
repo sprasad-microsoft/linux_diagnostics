@@ -18,12 +18,14 @@ class ConfigManager:
     def __init__(self, config_path: str):
         """Initializes the ConfigManager by loading and parsing the
         configuration file."""
-        logger.info("Loading configuration from: %s", config_path)
+        if __debug__:
+            logger.info("Loading configuration from: %s", config_path)
         config_data = self._load_yaml(config_path)
         watcher = self._parse_watcher(config_data)
         guardian = self._parse_guardian(config_data)
         self.data = self._build_config(config_data, watcher, guardian)
-        logger.info("Configuration loaded successfully")
+        if __debug__:
+            logger.info("Configuration loaded successfully")
 
     def _load_yaml(self, config_path: str):
         """Load the YAML configuration file."""

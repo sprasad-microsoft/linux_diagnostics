@@ -45,8 +45,12 @@ class EventDispatcher:
         shm_file_path = f"/dev/shm{SHM_NAME}"
         try:
             shm_fd = os.open(shm_file_path, os.O_RDWR)
+            if __debug__:
+                logger.info("Opened existing shared memory: %s", shm_file_path)
         except FileNotFoundError:
-            logger.info("Shared memory not found, creating new: %s", shm_file_path)
+            # This is expected on first startup - create new shared memory
+            if __debug__:
+                logger.info("Shared memory not found, creating new: %s", shm_file_path)
             shm_fd = os.open(shm_file_path, os.O_RDWR | os.O_CREAT, 0o666)
             shm_created = True
         except Exception as e:
@@ -112,7 +116,7 @@ class EventDispatcher:
                 if __debug__:
                     batch_count += 1
                     total_events_processed += len(parsed_events)
-                
+                    
                     if batch_count % 10 == 0:  # Log metrics every 10 batches
                         avg_events_per_batch = total_events_processed / batch_count
                         logger.debug("EventDispatcher metrics: batches=%d, total_events=%d, avg_per_batch=%.1f", 
@@ -124,8 +128,6 @@ class EventDispatcher:
         if __debug__:
             logger.debug("EventDispatcher stopping. Final metrics: batches=%d, total_events=%d", 
                        batch_count, total_events_processed)
-        else:
-            logger.info("EventDispatcher stopping")
         self.controller.eventQueue.put(None) #send sentinal to the queue
 
     def _poll_shm_buffer(self) -> bytes:

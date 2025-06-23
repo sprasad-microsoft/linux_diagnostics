@@ -52,7 +52,6 @@ class Controller:
         
         # Metrics tracking
         if __debug__:
-            self.start_time = time.time()
             self.thread_restarts = 0
             self.process_restarts = 0
         self.eventQueue = queue.Queue()
@@ -161,7 +160,7 @@ class Controller:
             thread.join(timeout=5)
             if __debug__:
                 logger.info("Thread %s with ID %d has been shut down", thread.name, thread.ident)
-        logger.info("Shutting down all components")
+                logger.info("Shutting down all components")
 
         if hasattr(self, "event_dispatcher"):
             self.event_dispatcher.cleanup()
@@ -177,7 +176,8 @@ class Controller:
 
     def run(self) -> None:
         """Start all supervisor threads and wait for shutdown."""
-        logger.info("Starting AOD service")
+        if __debug__:
+            logger.info("Starting AOD service")
         set_thread_name("Controller") #only to view thread name in top
         tool_names = self._extract_tools()
         if __debug__:
@@ -206,7 +206,8 @@ class Controller:
 
 def handle_signal(controller, signum, frame):
     """Handle termination signals to gracefully shut down the controller."""
-    logger.info("Received signal %d, shutting down...", signum)
+    if __debug__:
+        logger.info("Received signal %d, shutting down...", signum)
     controller.stop()
 
 

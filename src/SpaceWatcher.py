@@ -33,7 +33,6 @@ class SpaceWatcher:
             self.cleanup_runs = 0
             self.total_files_deleted = 0
             self.total_space_freed_mb = 0
-            self.start_time = time.time()
             logger.info("SpaceWatcher initialized: max_size=%dMB, max_age=%d days, cleanup_interval=%ds", 
                        self.max_total_log_suze_mb, self.max_log_age_days, self.cleanup_interval)
 
@@ -62,8 +61,8 @@ class SpaceWatcher:
         """Check if disk space is below a threshold using pathlib."""
         total_size = sum(f.stat().st_size for f in self.batches_dir.glob("**/*") if f.is_file())
         if total_size > self.max_total_log_suze_mb * 1024 * 1024:  # Convert MB to bytes
-            logger.warning("Total log size %.2f MB exceeds max %d MB", 
-                         total_size / (1024 * 1024), self.max_total_log_suze_mb)
+            logger.info("Total log size %.2f MB exceeds max %d MB, starting cleanup", 
+                       total_size / (1024 * 1024), self.max_total_log_suze_mb)
             return True
         return False
 
@@ -107,8 +106,6 @@ class SpaceWatcher:
             self.total_space_freed_mb += space_freed_bytes / (1024 * 1024)
             logger.info("Age-based cleanup complete. Deleted %d batch entries (%.1f MB freed).", 
                        deleted_count, space_freed_bytes / (1024 * 1024))
-        else:
-            logger.info("Age-based cleanup complete")
 
     def cleanup_by_size(self) -> None:
         """Delete oldest files or directories starting with aod_ until total size is under max_total_log_suze_mb."""
@@ -128,7 +125,8 @@ class SpaceWatcher:
 
         total_size = sum(entry_size(e) for e in entries)
         max_allowed_bytes = self.max_total_log_suze_mb * 1024 * 1024
-        logger.info("Total size of AOD entries: %.2f MB, max allowed: %d MB", 
+        if __debug__:
+            logger.info("Total size of AOD entries: %.2f MB, max allowed: %d MB", 
                    total_size / (1024 * 1024), self.max_total_log_suze_mb)
 
         if __debug__:
@@ -156,11 +154,8 @@ class SpaceWatcher:
             
             # Log comprehensive metrics every 5 cleanup runs
             if self.cleanup_runs % 5 == 0:
-                runtime = time.time() - self.start_time
-                logger.debug("SpaceWatcher metrics: runs=%d, files_deleted=%d, space_freed=%.1fMB, runtime=%.1fs", 
-                           self.cleanup_runs, self.total_files_deleted, self.total_space_freed_mb, runtime)
+                logger.debug("SpaceWatcher metrics: runs=%d, files_deleted=%d, space_freed=%.1fMB", 
+                           self.cleanup_runs, self.total_files_deleted, self.total_space_freed_mb)
 
             logger.info("Size-based cleanup complete. Deleted %d entries (%.1f MB freed). Total size now: %.2f MB", 
                        deleted_count, space_freed_bytes / (1024 * 1024), total_size / (1024 * 1024))
-        else:
-            logger.info("Size-based cleanup complete. Total size now: %.2f MB", total_size / (1024 * 1024))

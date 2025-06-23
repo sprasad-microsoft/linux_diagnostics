@@ -42,7 +42,6 @@ class AnomalyWatcher:
             self.total_count = 0
             self.batch_count = 0
             self.anomaly_counts = {anomaly_type: 0 for anomaly_type in self.handlers.keys()}
-            self.start_time = time.time()
             self.events_by_tool = {}  # Track events per tool type
         
         if __debug__:
@@ -107,7 +106,8 @@ class AnomalyWatcher:
                 if len(masked_batch) > 0 and handler.detect(masked_batch):
                     action = self._generate_action(anomaly_type)
                     self.controller.anomalyActionQueue.put(action)
-                    logger.info("Anomaly detected: %s (%d events analyzed)", anomaly_type.value, len(masked_batch))
+                    if __debug__:
+                        logger.info("Anomaly detected: %s (%d events analyzed)", anomaly_type.value, len(masked_batch))
                     
                     if __debug__:
                         self.anomaly_counts[anomaly_type] += 1
@@ -124,17 +124,12 @@ class AnomalyWatcher:
     def _log_metrics(self) -> None:
         """Log comprehensive metrics for debugging and performance analysis."""
         if __debug__:
-            runtime = time.time() - self.start_time
             total_anomalies = sum(self.anomaly_counts.values())
             
             logger.debug("=== AnomalyWatcher Metrics ===")
-            logger.debug("Runtime: %.1fs, Batches: %d, Total Events: %d", 
-                        runtime, self.batch_count, self.total_count)
-            logger.debug("Total Anomalies: %d, Anomaly Rate: %.2f/min", 
-                        total_anomalies, (total_anomalies * 60) / runtime if runtime > 0 else 0)
-            logger.debug("Events/sec: %.1f, Batches/sec: %.2f", 
-                        self.total_count / runtime if runtime > 0 else 0,
-                        self.batch_count / runtime if runtime > 0 else 0)
+            logger.debug("Batches: %d, Total Events: %d", 
+                        self.batch_count, self.total_count)
+            logger.debug("Total Anomalies: %d", total_anomalies)
             
             for anomaly_type, count in self.anomaly_counts.items():
                 if count > 0:
