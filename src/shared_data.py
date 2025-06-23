@@ -2,8 +2,48 @@
 
 import ctypes
 import errno
+import logging
+import time
 from types import MappingProxyType
 import numpy as np
+
+
+class SimpleMetrics:
+    """Simple metrics collection class for performance monitoring."""
+    
+    def __init__(self):
+        self.counters = {}
+        self.timers = {}
+        self.logger = logging.getLogger(__name__)
+    
+    def increment(self, metric_name: str, value: int = 1):
+        """Increment a counter metric."""
+        if __debug__:
+            self.counters[metric_name] = self.counters.get(metric_name, 0) + value
+            self.logger.debug("Metric %s incremented by %d (total: %d)", 
+                            metric_name, value, self.counters[metric_name])
+    
+    def start_timer(self, metric_name: str):
+        """Start a timer for measuring durations."""
+        if __debug__:
+            self.timers[metric_name] = time.time()
+    
+    def end_timer(self, metric_name: str):
+        """End a timer and log the duration."""
+        if __debug__ and metric_name in self.timers:
+            duration = time.time() - self.timers[metric_name]
+            self.logger.debug("Timer %s completed in %.3f seconds", metric_name, duration)
+            del self.timers[metric_name]
+            return duration
+    
+    def log_metrics(self):
+        """Log all current metrics."""
+        if __debug__ and self.counters:
+            self.logger.info("Current metrics: %s", self.counters)
+
+
+# Global metrics instance
+metrics = SimpleMetrics()
 
 
 SHM_NAME = "/bpf_shm"

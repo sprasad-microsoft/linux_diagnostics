@@ -202,3 +202,5 @@ __marimo__/
 
 #ignore test_files folder
 test_files/
+profiling_outputs/
+profile_full_system.sh

@@ -14,6 +14,7 @@ import time
 import traceback
 import ctypes
 import ctypes.util
+import logging
 
 
 from shared_data import ALL_SMB_CMDS
@@ -22,6 +23,8 @@ from EventDispatcher import EventDispatcher
 from AnomalyWatcher import AnomalyWatcher
 from LogCollector import LogCollector
 from SpaceWatcher import SpaceWatcher
+
+logger = logging.getLogger(__name__)
 
 
 def set_thread_name(name):
@@ -41,9 +44,17 @@ class Controller:
     def __init__(self, config_path: str):
         """Manages configuration, starts and supervises all service components,
         and coordinates graceful shutdown."""
+        if __debug__:
+            logger.info("Initializing Controller with config: %s", config_path)
         self.stop_event = threading.Event()
         self.config = ConfigManager(config_path).data
         self.threads = []
+        
+        # Metrics tracking
+        if __debug__:
+            self.start_time = time.time()
+            self.thread_restarts = 0
+            self.process_restarts = 0
         self.eventQueue = queue.Queue()
         self.anomalyActionQueue = queue.Queue()
         self.tool_processes = {}
@@ -53,10 +64,14 @@ class Controller:
         }
 
         # Initialize all components
+        if __debug__:
+            logger.info("Initializing service components")
         self.event_dispatcher = EventDispatcher(self)
         self.anomaly_watcher = AnomalyWatcher(self)
         self.log_collector_manager = LogCollector(self)
         self.space_watcher = SpaceWatcher(self)
+        if __debug__:
+            logger.info("Controller initialization complete")
 
 
     def _supervise_thread(self, thread_name: str, target: callable, *args, **kwargs) -> None:
@@ -69,12 +84,15 @@ class Controller:
                 try:
                     target(*args, **kwargs)
                 except RuntimeError:
-                    print(f"{thread_name} died: {traceback.format_exc()}")
+                    logger.error("%s died: %s", thread_name, traceback.format_exc())
+                    if __debug__:
+                        self.thread_restarts += 1
                     time.sleep(1)  # Wait before restarting
 
         t = threading.Thread(target=runner, name=thread_name, daemon=True)
         t.start()
-        print(f"[Controller] Started thread {thread_name} with ID {t.ident}")
+        if __debug__:
+            logger.info("Started thread %s with ID %d", thread_name, t.ident)
         self.threads.append(t)
 
     def _supervise_process(self, process_name: str, start_func: callable) -> None:
@@ -83,22 +101,25 @@ class Controller:
         while not self.stop_event.is_set():
             process = start_func()
             self.tool_processes[process_name] = process
-            print(f"[Controller] Started {process_name} process with PID {process.pid}")
+            if __debug__:
+                logger.info("Started %s process with PID %d", process_name, process.pid)
             while True:
                 if self.stop_event.wait(timeout=1):
                     break
                 if process.poll() is not None:
-                    print(
-                        f"[Controller] {process_name} process exited unexpectedly with code {process.returncode}, restarting..."
-                    )
+                    logger.warning("%s process exited unexpectedly with code %d, restarting...", 
+                                 process_name, process.returncode)
+                    if __debug__:
+                        self.process_restarts += 1
                     break
             if self.stop_event.is_set():
                 try:
                     os.killpg(os.getpgid(process.pid), signal.SIGINT)
                     process.wait(timeout=5)
-                    print(f"[Controller] {process_name} process stopped gracefully")
+                    if __debug__:
+                        logger.info("%s process stopped gracefully", process_name)
                 except RuntimeError:
-                    print(f"[Controller] {process_name} process did not stop gracefully")
+                    logger.warning("%s process did not stop gracefully", process_name)
                 break
             time.sleep(1)
 
@@ -138,8 +159,9 @@ class Controller:
 
         for thread in self.threads:
             thread.join(timeout=5)
-            print(f"[Controller] Thread {thread.name} with ID {thread.ident} has been shut down")
-        print("[Controller] Shutting down all components")
+            if __debug__:
+                logger.info("Thread %s with ID %d has been shut down", thread.name, thread.ident)
+        logger.info("Shutting down all components")
 
         if hasattr(self, "event_dispatcher"):
             self.event_dispatcher.cleanup()
@@ -155,8 +177,11 @@ class Controller:
 
     def run(self) -> None:
         """Start all supervisor threads and wait for shutdown."""
+        logger.info("Starting AOD service")
         set_thread_name("Controller") #only to view thread name in top
         tool_names = self._extract_tools()
+        if __debug__:
+            logger.info("Starting tools: %s", tool_names)
         for tool_name in tool_names:
             start_func = self.tool_starters.get(tool_name)
             if start_func:
@@ -169,7 +194,7 @@ class Controller:
                 t.start()
                 self.threads.append(t)
             else:
-                print(f"Warning: No start function defined for tool '{tool_name}'")
+                logger.warning("No start function defined for tool '%s'", tool_name)
 
         self._supervise_thread("EventDispatcher", self.event_dispatcher.run)
         self._supervise_thread("AnomalyWatcher", self.anomaly_watcher.run)
@@ -181,7 +206,7 @@ class Controller:
 
 def handle_signal(controller, signum, frame):
     """Handle termination signals to gracefully shut down the controller."""
-    print(f"Received signal {signum}, shutting down...")
+    logger.info("Received signal %d, shutting down...", signum)
     controller.stop()
 
 
@@ -203,8 +228,18 @@ def main():
 
 
 if __name__ == "__main__":
+    # Simple logging setup - configure root logger
+    # Performance optimized: Verbose logger.info calls wrapped in if __debug__
+    # Use python -O for production to remove all debug overhead
+    log_level = os.getenv('AOD_LOG_LEVEL', 'INFO').upper()
+    logging.basicConfig(
+        level=getattr(logging, log_level, logging.INFO),
+        format='%(name)s - %(levelname)s - %(message)s'
+    )
+    
     try:
         main()
     except Exception as e:
-        print("Fatal error in main():", e)
-        traceback.print_exc()
+        logging.error("Fatal error in main(): %s", e)
+        if __debug__:
+            logging.debug("Full traceback:", exc_info=True)

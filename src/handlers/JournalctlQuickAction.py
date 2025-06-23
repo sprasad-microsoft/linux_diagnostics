@@ -1,6 +1,8 @@
 
-
+import logging
 from base.QuickAction import QuickAction
+
+logger = logging.getLogger(__name__)
 
 class JournalctlQuickAction(QuickAction):
 
@@ -11,6 +13,8 @@ class JournalctlQuickAction(QuickAction):
         """
         super().__init__(batches_root, "journalctl.log")
         self.anomaly_interval = anomaly_interval
+        if __debug__:
+            logger.debug("JournalctlQuickAction initialized with interval=%ds", anomaly_interval)
 
     def get_command(self) -> tuple[list[str], str] :
         return [

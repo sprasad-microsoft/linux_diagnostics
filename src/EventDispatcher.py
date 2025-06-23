@@ -2,6 +2,7 @@
 the controller's event queue."""
 
 # import ctypes
+import logging
 import os
 import mmap
 import time
@@ -9,6 +10,8 @@ import struct
 import numpy as np
 
 from shared_data import SHM_NAME, SHM_SIZE, SHM_DATA_SIZE, HEAD_TAIL_BYTES, event_dtype, MAX_WAIT
+
+logger = logging.getLogger(__name__)
 
 # Ensure that the size of Event and event_dtype is same
 # assert ctypes.sizeof(Event) == event_dtype.itemsize, (
@@ -28,6 +31,8 @@ class EventDispatcher:
         """Initialize the EventDispatcher."""
         self.controller = controller
         self.head_tail_fmt = "<Q" if HEAD_TAIL_BYTES == 8 else "<I"
+        if __debug__:
+            logger.info("EventDispatcher initialized, shared memory: %s", SHM_NAME)
         self.shm_fd, self.shm_map = self._setup_shared_memory()
 
     def _setup_shared_memory(self) -> tuple[int, mmap.mmap]:
@@ -41,17 +46,18 @@ class EventDispatcher:
         try:
             shm_fd = os.open(shm_file_path, os.O_RDWR)
         except FileNotFoundError:
+            logger.info("Shared memory not found, creating new: %s", shm_file_path)
             shm_fd = os.open(shm_file_path, os.O_RDWR | os.O_CREAT, 0o666)
             shm_created = True
         except Exception as e:
-            print(f"Failed to open shared memory: {e}")
+            logger.error("Failed to open shared memory: %s", e)
             raise
 
         if shm_created:
             try:
                 os.ftruncate(shm_fd, SHM_SIZE)
             except Exception as e:
-                print(f"Failed to set size of shared memory: {e}")
+                logger.error("Failed to set size of shared memory: %s", e)
                 os.close(shm_fd)
                 raise
 
@@ -60,7 +66,7 @@ class EventDispatcher:
                 shm_fd, SHM_SIZE, flags=mmap.MAP_SHARED, prot=mmap.PROT_READ | mmap.PROT_WRITE
             )
         except Exception as e:
-            print(f"Failed to map shared memory: {e}")
+            logger.error("Failed to map shared memory: %s", e)
             os.close(shm_fd)
             raise
 
@@ -80,21 +86,46 @@ class EventDispatcher:
 
     def run(self) -> None:
         """Loop: poll eventQueue, detect anomalies, and put actions into anomalyActionQueue"""
-        print("EventDispatcher started running")
+        if __debug__:
+            logger.info("EventDispatcher started running")
         timer = 3
+        if __debug__:
+            total_events_processed = 0
+            batch_count = 0
+        
         while not self.controller.stop_event.is_set():
             no_of_events = self._get_buffer_size() // event_dtype.itemsize
             if no_of_events >= 10 or timer == 0:
                 timer = 3  # reset timer
                 if no_of_events == 0:
                     continue
+                    
+                if __debug__:
+                    logger.debug("Processing %d events from shared memory", no_of_events)
+                
                 time.sleep(MAX_WAIT)
                 raw_events = self._poll_shm_buffer()
                 parsed_events = self._parse(raw_events)
                 self.controller.eventQueue.put(parsed_events)
+                
+                # Metrics tracking
+                if __debug__:
+                    batch_count += 1
+                    total_events_processed += len(parsed_events)
+                
+                    if batch_count % 10 == 0:  # Log metrics every 10 batches
+                        avg_events_per_batch = total_events_processed / batch_count
+                        logger.debug("EventDispatcher metrics: batches=%d, total_events=%d, avg_per_batch=%.1f", 
+                                   batch_count, total_events_processed, avg_events_per_batch)
             else:
                 time.sleep(1)
                 timer -= 1
+        
+        if __debug__:
+            logger.debug("EventDispatcher stopping. Final metrics: batches=%d, total_events=%d", 
+                       batch_count, total_events_processed)
+        else:
+            logger.info("EventDispatcher stopping")
         self.controller.eventQueue.put(None) #send sentinal to the queue
 
     def _poll_shm_buffer(self) -> bytes:
@@ -148,13 +179,13 @@ class EventDispatcher:
             head = struct.unpack_from(self.head_tail_fmt, self.shm_map, 0)[0]
             tail = struct.unpack_from(self.head_tail_fmt, self.shm_map, 8)[0]
             if head != tail:
-                print(
-                    "EventDispatcher: Warning - head and tail are not equal, indicating potential data loss."
-                )
+                logger.warning("Head and tail are not equal, indicating potential data loss (head=%d, tail=%d)", 
+                             head, tail)
 
             self.shm_map.close()
             os.close(self.shm_fd)
             os.unlink(f"/dev/shm{SHM_NAME}")
-            print("EventDispatcher: Shared memory cleaned up")
+            if __debug__:
+                logger.info("Shared memory cleaned up")
         except OSError as e:
-            print(f"EventDispatcher: Error cleaning up shared memory: {e}")
+            logger.error("Error cleaning up shared memory: %s", e)

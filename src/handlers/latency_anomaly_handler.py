@@ -1,9 +1,12 @@
 """Latency Anomaly Handler This handler detects latency anomalies based on
 predefined thresholds for SMB commands."""
 
+import logging
 import numpy as np
 from base.AnomalyHandlerBase import AnomalyHandler
 from shared_data import ALL_SMB_CMDS
+
+logger = logging.getLogger(__name__)
 
 
 # works only if ebpf code does filtering as per config file (i.e. ignore excluded cmds)
@@ -18,6 +21,7 @@ class LatencyAnomalyHandler(AnomalyHandler):
         self.threshold_lookup = np.full(len(ALL_SMB_CMDS) + 1, 0, dtype=np.uint64)
         for smb_cmd_id, threshold in self.config.track.items():
             self.threshold_lookup[smb_cmd_id] = threshold * 1000000
+        logger.debug("LatencyAnomalyHandler initialized with %d thresholds", len(self.config.track))
 
     # works only if ebpf code does filtering as per config file (i.e. ignore excluded cmds)
     def detect(self, events_batch: np.ndarray) -> bool:
@@ -28,5 +32,7 @@ class LatencyAnomalyHandler(AnomalyHandler):
         )
         max_latency = np.max(events_batch["metric_latency_ns"])
 
-        print(f"[AnomalyHandler] Detected {anomaly_count} latency anomalies for {self.config.tool}")
+        if __debug__:
+            logger.debug("Detected %d latency anomalies for %s, max_latency=%.2fms", 
+                        anomaly_count, self.config.tool, max_latency / 1e6)
         return anomaly_count >= self.acceptable_count or max_latency >= 1e9  # 1 second

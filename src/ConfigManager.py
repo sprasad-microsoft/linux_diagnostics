@@ -1,10 +1,13 @@
 """Parses the config YAML into python dataclass."""
 
+import logging
 import warnings
 import yaml
 from shared_data import ALL_SMB_CMDS, ALL_ERROR_CODES
 from utils.anomaly_type import AnomalyType
 from utils.config_schema import Config, WatcherConfig, GuardianConfig, AnomalyConfig
+
+logger = logging.getLogger(__name__)
 
 
 class ConfigManager:
@@ -15,10 +18,12 @@ class ConfigManager:
     def __init__(self, config_path: str):
         """Initializes the ConfigManager by loading and parsing the
         configuration file."""
+        logger.info("Loading configuration from: %s", config_path)
         config_data = self._load_yaml(config_path)
         watcher = self._parse_watcher(config_data)
         guardian = self._parse_guardian(config_data)
         self.data = self._build_config(config_data, watcher, guardian)
+        logger.info("Configuration loaded successfully")
 
     def _load_yaml(self, config_path: str):
         """Load the YAML configuration file."""
@@ -26,20 +31,26 @@ class ConfigManager:
             with open(config_path, "r", encoding="utf-8") as file:
                 return yaml.safe_load(file)
         except FileNotFoundError as exc:
+            logger.error("Config file not found: %s", config_path)
             raise RuntimeError(f"Config file not found: {config_path}") from exc
         except yaml.YAMLError as exc:
+            logger.error("Invalid YAML in config file: %s", exc)
+            raise RuntimeError(f"Invalid YAML in config file: {exc}") from exc
             raise RuntimeError(f"YAML parsing error in config file: {exc}") from exc
 
     def _parse_watcher(self, config_data: dict):
         """Parse the watcher section of the config."""
+        logger.debug("Parsing watcher configuration")
         return WatcherConfig(actions=config_data["watcher"]["actions"])
 
     def _parse_guardian(self, config_data: dict):
         """Parse the guardian section and its anomalies."""
+        logger.debug("Parsing guardian configuration")
         anomalies = {}
         for name, anomaly in config_data["guardian"]["anomalies"].items():
             track = self._get_track_for_anomaly(anomaly)
             if not track or (isinstance(track, dict) and len(track) == 0):
+                logger.error("No items to track for anomaly '%s' after applying config logic", name)
                 raise ValueError(
                     f"No items to track for anomaly '{name}' after applying config logic."
                 )

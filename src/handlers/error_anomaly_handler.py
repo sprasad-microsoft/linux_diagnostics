@@ -1,7 +1,10 @@
 """Error Anomaly Handler Module Will be added later."""
 
+import logging
 import numpy as np
 from base.AnomalyHandlerBase import AnomalyHandler
+
+logger = logging.getLogger(__name__)
 
 
 class ErrorAnomalyHandler(AnomalyHandler):
