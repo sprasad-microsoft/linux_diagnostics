@@ -82,11 +82,14 @@ class Controller:
             while not self.stop_event.is_set():
                 try:
                     target(*args, **kwargs)
-                except RuntimeError:
-                    logger.error("%s died: %s", thread_name, traceback.format_exc())
+                except Exception as e:
+                    logger.error("%s thread died unexpectedly: %s", thread_name, e)
                     if __debug__:
+                        logger.debug("Full traceback:", exc_info=True)
                         self.thread_restarts += 1
                     time.sleep(1)  # Wait before restarting
+                    if __debug__:
+                        logger.info("Restarting %s thread", thread_name)
 
         t = threading.Thread(target=runner, name=thread_name, daemon=True)
         t.start()

@@ -10,27 +10,14 @@ import csv
 import sys
 import os
 from datetime import datetime
+from pathlib import Path
 
 def get_disk_usage(path):
     """Get disk usage in MB using du -sh command."""
     try:
-        result = subprocess.run(['du', '-sh', path], 
-                              capture_output=True, text=True, check=True)
+        result = sum(f.stat().st_size for f in Path(path).glob("**/*") if f.is_file())
         # Parse output like "1.2G	/var/log/aod/batches"
-        size_str = result.stdout.split()[0]
-        
-        # Convert to MB
-        if size_str.endswith('K'):
-            size_mb = float(size_str[:-1]) / 1024
-        elif size_str.endswith('M'):
-            size_mb = float(size_str[:-1])
-        elif size_str.endswith('G'):
-            size_mb = float(size_str[:-1]) * 1024
-        elif size_str.endswith('T'):
-            size_mb = float(size_str[:-1]) * 1024 * 1024
-        else:
-            # Assume bytes
-            size_mb = float(size_str) / (1024 * 1024)
+        size_mb = result / (1024 * 1024)  # Convert bytes to MB
         
         return size_mb
     except subprocess.CalledProcessError:
