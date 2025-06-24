@@ -24,12 +24,20 @@ def compare_csv_files(file1, file2):
     # Create plots
     fig, (ax1, ax2) = plt.subplots(2, 1, figsize=(12, 8))
     
+    # Calculate dynamic Y-axis limits for CPU
+    max_cpu = max(df1['CPU_Percent'].max(), df2['CPU_Percent'].max())
+    cpu_limit = min(100, max_cpu + 15)  # Add 15% buffer, cap at 100
+    cpu_ticks = [i for i in range(0, int(cpu_limit) + 1, 25) if i <= cpu_limit]
+    if cpu_limit not in cpu_ticks:
+        cpu_ticks.append(int(cpu_limit))
+    
     # CPU comparison
     ax1.plot(df1['Seconds'], df1['CPU_Percent'], label='Without AOD', linewidth=1)
     ax1.plot(df2['Seconds'], df2['CPU_Percent'], label='With AOD', linewidth=1)
     ax1.set_title('CPU Usage Comparison')
     ax1.set_ylabel('CPU (%)')
-    ax1.set_ylim(0, 100)
+    ax1.set_ylim(0, cpu_limit)
+    ax1.set_yticks(cpu_ticks)
     ax1.legend()
     ax1.grid(True, alpha=0.3)
     
@@ -39,6 +47,7 @@ def compare_csv_files(file1, file2):
     ax2.set_title('Memory Usage Comparison')
     ax2.set_ylabel('Memory (%)')
     ax2.set_ylim(0, 100)
+    ax2.set_yticks([0, 25, 50, 75, 100])
     ax2.set_xlabel('Time (seconds)')
     ax2.legend()
     ax2.grid(True, alpha=0.3)
