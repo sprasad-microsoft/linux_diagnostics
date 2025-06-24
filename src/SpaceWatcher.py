@@ -61,8 +61,8 @@ class SpaceWatcher:
         """Check if disk space is below a threshold using pathlib."""
         total_size = sum(f.stat().st_size for f in self.batches_dir.glob("**/*") if f.is_file())
         if total_size > self.max_total_log_suze_mb * 1024 * 1024:  # Convert MB to bytes
-            logger.info("Total log size %.2f MB exceeds max %d MB, starting cleanup", 
-                       total_size / (1024 * 1024), self.max_total_log_suze_mb)
+            logger.warning("Total log size %.2f MB exceeds max %d MB", 
+                         total_size / (1024 * 1024), self.max_total_log_suze_mb)
             return True
         return False
 

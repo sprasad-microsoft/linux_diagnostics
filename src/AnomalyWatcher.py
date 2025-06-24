@@ -37,15 +37,11 @@ class AnomalyWatcher:
         self.handlers: dict[AnomalyType, AnomalyHandler] = self._load_anomaly_handlers(
             controller.config
         )
-        # Metrics tracking
-        if __debug__:
-            self.total_count = 0
-            self.batch_count = 0
-            self.anomaly_counts = {anomaly_type: 0 for anomaly_type in self.handlers.keys()}
-            self.events_by_tool = {}  # Track events per tool type
-        
-        if __debug__:
-            logger.info("AnomalyWatcher initialized with %d handlers, interval=%ds", len(self.handlers), self.interval)
+        self.total_count = 0
+
+        # Initialize metrics tracking attributes
+        self.events_by_tool = {}
+        self.anomaly_counts = {anomaly_type: 0 for anomaly_type in ANOMALY_HANDLER_REGISTRY.keys()}
 
     def _load_anomaly_handlers(self, config) -> dict[AnomalyType, AnomalyHandler]:
         handler_map = {}
@@ -53,19 +49,27 @@ class AnomalyWatcher:
             try:
                 anomaly_type_enum = AnomalyType(anomaly_cfg.type.strip().lower())
             except ValueError:
-                logger.warning("Unknown anomaly type '%s' for '%s'", anomaly_cfg.type, anomaly_name)
+                print(
+                    f"[AnomalyWatcher] Warning: Unknown anomaly type '{anomaly_cfg.type}' for '{anomaly_name}'"
+                )
                 continue
 
             handler_class = ANOMALY_HANDLER_REGISTRY.get(anomaly_type_enum)
             if handler_class:
                 handler_map[anomaly_type_enum] = handler_class(anomaly_cfg)
-                logger.debug("Loaded handler for anomaly type: %s", anomaly_cfg.type)
             else:
-                logger.warning("No handler registered for anomaly type '%s'", anomaly_cfg.type)
+                print(
+                    f"[AnomalyWatcher] Warning: No handler registered for anomaly type '{anomaly_cfg.type}'"
+                )
         return handler_map
 
     def run(self) -> None:
         """Loop: poll eventQueue, detect anomalies, and put actions into anomalyActionQueue"""
+        if __debug__:
+            total_anomalies_detected = 0
+            batch_count = 0
+            total_latency = 0
+            
         while True:
             batch = self.controller.eventQueue.get(True)
             if batch is None:
@@ -87,10 +91,15 @@ class AnomalyWatcher:
                 except queue.Empty:
                     break
 
-            
             if __debug__:
                 self.total_count += len(batch)
-                self.batch_count += 1
+                batch_count += 1
+                
+                # Calculate average latency for this batch
+                if len(batch) > 0 and 'latency_ns' in batch.dtype.names:
+                    batch_latency = batch['latency_ns'].sum()
+                    total_latency += batch_latency
+                
                 logger.debug("Processing batch of %d events, total count: %d", len(batch), self.total_count)
 
             for anomaly_type, handler in self.handlers.items():
@@ -107,33 +116,20 @@ class AnomalyWatcher:
                     action = self._generate_action(anomaly_type)
                     self.controller.anomalyActionQueue.put(action)
                     if __debug__:
-                        logger.info("Anomaly detected: %s (%d events analyzed)", anomaly_type.value, len(masked_batch))
-                    
-                    if __debug__:
+                        total_anomalies_detected += 1
                         self.anomaly_counts[anomaly_type] += 1
-                        # Log detailed metrics every 10 anomalies
-                        if sum(self.anomaly_counts.values()) % 10 == 0:
-                            self._log_metrics()
+                        logger.info("Anomaly detected: %s (%d events analyzed)", anomaly_type.value, len(masked_batch))
 
             self.controller.eventQueue.task_done()
             if sentinal_found:
                 self.controller.anomalyActionQueue.put(None)
                 break
             time.sleep(self.interval)
-
-    def _log_metrics(self) -> None:
-        """Log comprehensive metrics for debugging and performance analysis."""
+        
         if __debug__:
-            total_anomalies = sum(self.anomaly_counts.values())
-            
-            logger.debug("=== AnomalyWatcher Metrics ===")
-            logger.debug("Batches: %d, Total Events: %d", 
-                        self.batch_count, self.total_count)
-            logger.debug("Total Anomalies: %d", total_anomalies)
-            
-            for anomaly_type, count in self.anomaly_counts.items():
-                if count > 0:
-                    logger.debug("  %s: %d anomalies", anomaly_type.value, count)
+            avg_latency_ms = (total_latency / self.total_count / 1_000_000) if self.total_count > 0 else 0
+            logger.info("AnomalyWatcher stopping. Final metrics: batches=%d, total_events=%d, total_anomalies=%d, avg_latency=%.2fms", 
+                       batch_count, self.total_count, total_anomalies_detected, avg_latency_ms)
 
     def _generate_action(self, anomaly_type: AnomalyType) -> dict:
         """Generate an action based on the detected anomaly."""

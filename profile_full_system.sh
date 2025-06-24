@@ -373,7 +373,7 @@ monitor_thread_resources() {
                                         cpu_times="0,0"
                                     fi
                                     echo "$timestamp,$tid,$thread_name,$cpu_percent,$mem_kb,$cpu_times" >> "$OUTPUT_DIR/detailed_thread_usage.csv" 2>/dev/null || \
-                                        log_warning "monitor_thread_resources" "Failed to write detailed thread data for TID $tid at iteration $i"
+                                        log_warning "monitor_thread_resources" "Failed to write detailed thread data for TID $tid ($thread_name) at iteration $i"
                                 fi
                             fi
                         fi
@@ -395,7 +395,7 @@ monitor_thread_resources() {
                         if [ -f "/proc/$PYTHON_CONTROLLER_PID/task/$tid/comm" ]; then
                             thread_name=$(cat "/proc/$PYTHON_CONTROLLER_PID/task/$tid/comm" 2>/dev/null || echo "unknown")
                             echo "$timestamp,$tid,$thread_name,$cpu_percent,N/A,N/A,N/A" >> "$OUTPUT_DIR/detailed_thread_usage.csv" 2>/dev/null || \
-                                log_warning "monitor_thread_resources" "Failed to write top fallback data for TID $tid at iteration $i"
+                                log_warning "monitor_thread_resources" "Failed to write top fallback data for TID $tid ($thread_name) at iteration $i"
                         fi
                     done
                 else

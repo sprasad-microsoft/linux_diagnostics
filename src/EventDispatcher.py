@@ -96,6 +96,7 @@ class EventDispatcher:
         if __debug__:
             total_events_processed = 0
             batch_count = 0
+            total_latency = 0
         
         while not self.controller.stop_event.is_set():
             no_of_events = self._get_buffer_size() // event_dtype.itemsize
@@ -115,19 +116,27 @@ class EventDispatcher:
                 # Metrics tracking
                 if __debug__:
                     batch_count += 1
-                    total_events_processed += len(parsed_events)
+                    batch_size = len(parsed_events)
+                    total_events_processed += batch_size
+                    
+                    # Calculate average latency for this batch
+                    if batch_size > 0 and 'latency_ns' in parsed_events.dtype.names:
+                        batch_latency = parsed_events['latency_ns'].sum()
+                        total_latency += batch_latency
                     
                     if batch_count % 10 == 0:  # Log metrics every 10 batches
                         avg_events_per_batch = total_events_processed / batch_count
-                        logger.debug("EventDispatcher metrics: batches=%d, total_events=%d, avg_per_batch=%.1f", 
-                                   batch_count, total_events_processed, avg_events_per_batch)
+                        avg_latency_ms = (total_latency / total_events_processed / 1_000_000) if total_events_processed > 0 else 0
+                        logger.debug("EventDispatcher metrics: batches=%d, total_events=%d, avg_per_batch=%.1f, avg_latency=%.2fms", 
+                                   batch_count, total_events_processed, avg_events_per_batch, avg_latency_ms)
             else:
                 time.sleep(1)
                 timer -= 1
         
         if __debug__:
-            logger.debug("EventDispatcher stopping. Final metrics: batches=%d, total_events=%d", 
-                       batch_count, total_events_processed)
+            avg_latency_ms = (total_latency / total_events_processed / 1_000_000) if total_events_processed > 0 else 0
+            logger.info("EventDispatcher stopping. Final metrics: batches=%d, total_events=%d, avg_latency=%.2fms", 
+                       batch_count, total_events_processed, avg_latency_ms)
         self.controller.eventQueue.put(None) #send sentinal to the queue
 
     def _poll_shm_buffer(self) -> bytes:
