@@ -40,8 +40,9 @@ class AnomalyWatcher:
         self.total_count = 0
 
         # Initialize metrics tracking attributes
-        self.events_by_tool = {}
-        self.anomaly_counts = {anomaly_type: 0 for anomaly_type in ANOMALY_HANDLER_REGISTRY.keys()}
+        if __debug__:
+            self.events_by_tool = {}
+            self.anomaly_counts = {anomaly_type: 0 for anomaly_type in ANOMALY_HANDLER_REGISTRY.keys()}
 
     def _load_anomaly_handlers(self, config) -> dict[AnomalyType, AnomalyHandler]:
         handler_map = {}
