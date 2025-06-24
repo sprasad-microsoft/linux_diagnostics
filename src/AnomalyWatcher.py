@@ -128,7 +128,7 @@ class AnomalyWatcher:
             time.sleep(self.interval)
         
         if __debug__:
-            avg_latency_ms = (total_latency / self.total_count / 1_000_000) if self.total_count > 0 else 0
+            avg_latency_ms = (float(total_latency) / float(self.total_count) / 1_000_000) if self.total_count > 0 else 0
             logger.info("AnomalyWatcher stopping. Final metrics: batches=%d, total_events=%d, total_anomalies=%d, avg_latency=%.2fms", 
                        batch_count, self.total_count, total_anomalies_detected, avg_latency_ms)
 
