@@ -16,7 +16,7 @@ PAGE_SIZE = 4096
 # Beware before changing page size, shm data size has a condition that is must be a multiple of the page size
 
 SHM_SIZE = (MAX_ENTRIES + 1) * PAGE_SIZE
-SHM_DATA_SIZE = SHM_SIZE - 2 * HEAD_TAIL_BYTES  # delete /10 later
+SHM_DATA_SIZE = SHM_SIZE - 2 * HEAD_TAIL_BYTES  
 
 MAX_WAIT = 0.005  # 5 ms, used in event dispatcher and anomaly watcher
 
