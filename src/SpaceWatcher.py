@@ -15,7 +15,7 @@ class SpaceWatcher:
     If it grows over a certain threshold, clean up older logs to bring the usage down to a safe threshold. 
     Every N days, clean up log bundles older than N days.
     
-    Only counts completed .tar.gz files to prevent race conditions with LogCollector."""
+    Only counts completed .tar.zst files to prevent race conditions with LogCollector."""
 
     def __init__(self, controller):
         """Initialize the SpaceWatcher."""
@@ -71,9 +71,9 @@ class SpaceWatcher:
         return False
 
     def _check_space(self) -> bool:
-        """Check if disk space is below a threshold using pathlib, only counting tar.gz files."""
+        """Check if disk space is below a threshold using pathlib, only counting tar.zst files."""
         try:
-            total_size = sum(f.stat().st_size for f in self.batches_dir.glob("**/*.tar.gz") if f.is_file())
+            total_size = sum(f.stat().st_size for f in self.batches_dir.glob("**/*.tar.zst") if f.is_file())
             total_size_mb = total_size / (1024 * 1024)
             max_size_mb = self.max_total_log_suze_mb
             
@@ -132,7 +132,7 @@ class SpaceWatcher:
             for entry in to_delete:
                 try:
                     if __debug__:
-                        size = entry.stat().st_size if entry.is_file() and entry.name.endswith('.tar.gz') else sum(f.stat().st_size for f in entry.glob("**/*.tar.gz") if f.is_file())
+                        size = entry.stat().st_size if entry.is_file() and entry.name.endswith('.tar.zst') else sum(f.stat().st_size for f in entry.glob("**/*.tar.zst") if f.is_file())
                     shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
                     if __debug__:
                         deleted_count += 1
@@ -169,9 +169,9 @@ class SpaceWatcher:
             def entry_size(e):
                 try:
                     if e.is_file():
-                        return e.stat().st_size if e.name.endswith('.tar.gz') else 0
+                        return e.stat().st_size if e.name.endswith('.tar.zst') else 0
                     else:
-                        return sum(f.stat().st_size for f in e.glob("**/*.tar.gz") if f.is_file())
+                        return sum(f.stat().st_size for f in e.glob("**/*.tar.zst") if f.is_file())
                 except (FileNotFoundError, PermissionError, OSError):
                     return 0
 

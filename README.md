@@ -18,25 +18,42 @@ AODv2 implements a sophisticated multi-threaded architecture designed for high-p
 
 ### Core Components
 
-- **Controller**: The central orchestrator that manages component lifecycle, handles service startup/shutdown, supervises thread execution, and coordinates graceful error recovery. Acts as the main entry point and service manager for the entire system.
+- **ConfigManager**: Validates and parses the configuration YAML into Python dataclasses, providing runtime access to configuration throughout the system.
 
-- **AnomalyWatcher**: The intelligent detection engine that continuously processes incoming events from eBPF tools. It maintains separate handlers for different anomaly types, applies configurable thresholds, and triggers alerts when patterns indicate performance issues.
+- **Controller**: The main orchestrator running in the primary process (not a thread). Manages startup, configuration, and shutdown of the AODv2 service. It coordinates all components and ensures the service runs under desired constraints. Supervises thread execution with automatic restart capabilities for failed threads/processes.
 
-- **EventDispatcher**: The routing and coordination hub that receives anomaly notifications and determines appropriate diagnostic responses. It manages the execution pipeline and ensures proper sequencing of diagnostic actions.
+- **EventDispatcher**: Polls the C ring buffer and drains all events from eBPF tools. Parses raw C structs into Python numpy struct arrays and sends them to the `eventQueue`. Runs in a dedicated thread with exception handling that propagates failures to the Controller for automatic restart.
 
-- **LogCollector**: The data collection engine responsible for executing diagnostic commands, gathering system information, compressing results, and organizing output into structured batches for analysis.
+- **AnomalyWatcher**: Registers as a consumer on the `eventQueue`. Sleeps for a configurable interval (`watch_interval_sec`), then wakes up and drains the queue. Computes masks to separate events by anomaly type and conducts anomaly analysis using specialized handlers. Queues anomaly events to the LogCollector's `anomalyActionQueue`.
 
-- **SpaceWatcher**: The autonomous housekeeping service that monitors disk usage, enforces retention policies, and performs automatic cleanup operations to prevent storage exhaustion. Features intelligent size-based and age-based cleanup strategies, efficient space calculation using logical file sizes (matching `tree -h` output), and configurable thresholds with automatic triggering at 90% capacity.
+- **LogCollector**: Consumes the `anomalyActionQueue` using an async event loop. For each anomaly event, it executes QuickActions using an async semaphore-bounded task system (`max_concurrent_tasks=4`) rather than a traditional threadpool. Compresses collected logs using fast zstd compression.
 
-- **ConfigManager**: The configuration management system that handles YAML parsing, validates settings against schemas, and provides runtime configuration access throughout the system.
+- **SpaceWatcher**: Autonomous cleanup service with configurable intervals (default: 60 seconds). Monitors disk usage and performs intelligent cleanup:
+  - **Size-based cleanup**: Triggers when usage exceeds 90% of configured limit
+  - **Age-based cleanup**: Removes logs older than `max_log_age_days` 
+  - **Emergency mode**: More aggressive cleanup (80% threshold) when usage exceeds 95%
+  - **Race condition prevention**: Only counts completed `.tar.zst` files for space calculations
 
 ### Component Communication
 
 The architecture uses a producer-consumer model with thread-safe queues for inter-component communication:
 
-- **Event Queue**: High-throughput queue carrying raw monitoring events from eBPF tools to the AnomalyWatcher
-- **Anomaly Queue**: Alert queue transmitting detected anomalies from AnomalyWatcher to EventDispatcher  
-- **Action Queue**: Task queue routing diagnostic requests from EventDispatcher to LogCollector
+- **Event Queue**: High-throughput queue carrying raw monitoring events from EventDispatcher to AnomalyWatcher
+- **Anomaly Action Queue**: Task queue carrying anomaly events from AnomalyWatcher to LogCollector
+
+### Anomaly Event Structure
+
+Anomaly events use a standardized format for communication between components:
+```python
+{
+    "anomaly": AnomalyType.LATENCY,  # Enum value (LATENCY, ERROR, etc.)
+    "timestamp": 1640995200000000000  # Nanoseconds since epoch (used as batch_id)
+}
+```
+
+The `timestamp` field serves dual purposes:
+- Unique identifier for the anomaly event
+- Directory name for log collection (`aod_{timestamp}/`)
 
 ### Thread Management
 
@@ -49,7 +66,7 @@ Each component runs in its own dedicated thread with proper lifecycle management
 
 ## 🔄 Real-Time Processing Pipeline
 
-AODv2's real-time processing system is built around an event streaming architecture.
+AODv2's real-time processing system is built around an efficient event streaming architecture with minimal kernel-user mode transitions.
 
 ### Event Collection Layer
 
@@ -58,31 +75,45 @@ AODv2's real-time processing system is built around an event streaming architect
 - `smbiosnoop`: Real-time SMB I/O and error code tracking  
 - Custom eBPF programs for specific monitoring requirements
 
+**Shared Memory Ring Buffer**:
+- Zero-copy event transfer from kernel eBPF to user space
+- Batch processing to minimize context switches
+- Configurable buffer sizes for high-throughput workloads
 
 ### Stream Processing
 
 **Event Flow**:
-1. **Kernel Events**: eBPF programs capture SMB operations
-2. **User Space Transfer**: Events transferred to AODv2 process
-3. **Batch Processing**: Events accumulated into batches (configurable interval)
-4. **Analysis**: Anomaly handlers process batches
-5. **Threshold Evaluation**: Analysis against configurable thresholds
-6. **Alert Generation**: Anomaly notifications generated for threshold violations
+1. **Kernel Events**: eBPF programs capture SMB operations and write to shared memory ring buffer
+2. **EventDispatcher**: Polls ring buffer, converts C structs to numpy arrays, queues events
+3. **Batch Processing**: AnomalyWatcher processes events in configurable intervals (`watch_interval_sec`)
+4. **Anomaly Analysis**: Specialized handlers analyze events against thresholds
+5. **Action Triggering**: Anomaly events queued for diagnostic collection
+6. **Log Collection**: Async execution of QuickActions with semaphore-based concurrency control
 
 **Processing Characteristics**:
-- **No Event Loss**: Ring buffer to AnomalyWatcher no packet lost, all analyzed
-- **Event Processing**: Configurable batch intervals
-- **Fault Tolerance**: Processing continues despite individual event errors
+- **No Event Loss**: Ring buffer design ensures all events are captured and analyzed
+- **Configurable Intervals**: Default 1-second batch processing with sub-second detection capability
+- **Fault Tolerance**: Individual component failures don't stop the processing pipeline
+- **Automatic Recovery**: Thread supervision with automatic restart on failures
 
 ### Anomaly Detection Algorithms
 
 **Latency Detection**:
 - Per-command threshold evaluation (SMB2_READ, SMB2_WRITE, etc.)
-- Configurable acceptable violation counts within time windows
-- Emergency detection for operations exceeding 1-second thresholds
+- Configurable acceptable violation counts within batch intervals
+- Emergency detection for operations exceeding 1-second thresholds (immediate trigger)
 
 **Error Pattern Detection**:
 - Error code frequency analysis with configurable tracking lists
+- Batch-based evaluation against acceptable error rates
+
+### Diagnostic Collection Pipeline
+
+**Asynchronous Collection System**:
+- Semaphore-bounded async tasks (default: 4 concurrent collections)
+- QuickAction execution for targeted diagnostic gathering
+- Zstd compression for fast log archival (2-3x faster than gzip)
+- Structured output organization with timestamp-based batch directories
 
 ## 📁 Project Structure
 
@@ -166,7 +197,7 @@ git clone <repository-url>
 cd linux_diagnostics
 
 # Install dependencies
-pip3 install numpy PyYAML
+pip3 install -r requirements.txt
 
 # Configure (edit config/config.yaml as needed)
 sudo mkdir -p /var/log/aod
@@ -205,6 +236,92 @@ sudo journalctl -u linux_diagnostics.service -f
 sudo systemctl stop linux_diagnostics.service
 ```
 
+## 📊 Monitoring & Analysis Tools
+
+The AODv2 system includes several standalone tools for performance monitoring and data analysis:
+
+### System Resource Monitoring
+
+**monitor.py** - Real-time system resource monitoring
+```bash
+# Monitor system resources (CPU, memory, disk I/O)
+python3 monitor.py [duration_seconds] [interval_seconds]
+
+# Examples
+python3 monitor.py 300 1      # Monitor for 5 minutes, 1-second intervals
+python3 monitor.py 60         # Monitor for 1 minute, default interval
+```
+
+**disk_monitor.py** - Disk usage monitoring and plotting
+```bash
+# Monitor disk usage with visual output
+python3 disk_monitor.py [duration_seconds] [device_path]
+
+# Examples  
+python3 disk_monitor.py 300 /dev/sda    # Monitor /dev/sda for 5 minutes
+python3 disk_monitor.py 120             # Monitor default device for 2 minutes
+```
+
+### Performance Comparison and Analysis
+
+**csv_range_compare.py** - Advanced range-based CSV comparison
+```bash
+# Compare two CSV files with range-based analysis (0-200s, 200-500s, 500-600s)
+python3 csv_range_compare.py file1.csv file2.csv [column_name]
+
+# Examples
+python3 csv_range_compare.py baseline.csv test.csv                    # Analyze both CPU and Memory
+python3 csv_range_compare.py without_aod.csv with_aod.csv CPU_Percent # Analyze specific column
+python3 csv_range_compare.py data1.csv data2.csv Memory_Percent       # Memory-specific analysis
+```
+
+Features:
+- **Automatic column detection**: Finds CPU and Memory columns automatically
+- **Range-based analysis**: Separate statistics for different time periods
+- **Visual comparisons**: Generates detailed plots for each range
+- **Comprehensive metrics**: Average, max, min, standard deviation, and percentage changes
+- **Flexible input**: Supports various timestamp formats and column naming
+
+**compare.py** - Basic CSV comparison and visualization
+```bash
+# Compare two monitoring CSV files
+python3 compare.py file1.csv file2.csv
+
+# Generates comparison graphs and statistics
+```
+
+**disk_plot.py** - Disk usage trend visualization
+```bash
+# Create disk usage plots from monitoring data
+python3 disk_plot.py monitoring_data.csv
+```
+
+### Sample Data Generation
+
+**generate_sample_csvs.py** - Create test data for analysis
+```bash
+# Generate sample CSV files for testing comparison tools
+python3 generate_sample_csvs.py
+
+# Creates baseline_sample.csv and test_sample.csv with realistic performance data
+```
+
+### Tool Dependencies
+
+Install required Python packages:
+```bash
+pip3 install -r requirements.txt
+
+# Or install individually:
+pip3 install pandas matplotlib numpy zstandard PyYAML
+```
+
+### Performance Optimizations
+
+- **Zstd Compression**: AODv2 uses Zstandard compression for log archives, providing faster compression and decompression compared to gzip while maintaining excellent compression ratios
+- **Range-based Analysis**: The comparison tools support time-range analysis to identify performance changes during specific periods
+- **Memory Efficient**: All monitoring tools use streaming data processing to handle large datasets
+
 ## ⚙️ Configuration
 
 The main configuration file is located at `config/config.yaml`. Key sections include:
@@ -242,10 +359,19 @@ guardian:
 ### Cleanup Settings
 ```yaml
 cleanup:
-  cleanup_interval_sec: 60       # Cleanup frequency
-  max_log_age_days: 2           # Maximum log retention
-  max_total_log_size_mb: 200    # Maximum total log size
+  cleanup_interval_sec: 60       # Cleanup check frequency (default: 60 seconds)
+  max_log_age_days: 2           # Maximum log retention (default: 2 days)
+  max_total_log_size_mb: 200    # Maximum total log size (default: 200 MB)
+  aod_output_dir: /var/log/aod  # Output directory for log storage
 ```
+
+**SpaceWatcher Behavior**:
+- **Normal Operation**: Checks every `cleanup_interval_sec` seconds
+- **Size Trigger**: Cleanup when usage exceeds 90% of `max_total_log_size_mb`
+- **Emergency Mode**: More aggressive cleanup (80% threshold) when usage exceeds 95%
+- **Age Cleanup**: Removes logs older than `max_log_age_days` days
+- **Emergency Frequency**: Checks 4x more frequently during emergency conditions
+- **File Types**: Only counts completed `.tar.zst` files (prevents race conditions)
 
 ### Diagnostic Actions
 ```yaml
@@ -560,6 +686,7 @@ The Controller and its components require only these Python packages:
 **Core Dependencies:**
 - `numpy` - Used by anomaly handlers for efficient event processing
 - `PyYAML` - Configuration file parsing (ConfigManager)
+- `zstandard` - Fast compression library for log archives (replaces gzip for better performance)
 
 **Standard Library Modules Used:**
 - `threading`, `queue` - Concurrency and communication
@@ -578,11 +705,14 @@ The Controller and its components require only these Python packages:
 
 ```bash
 # Install core dependencies
-pip3 install numpy PyYAML
+pip3 install numpy PyYAML zstandard
 
-# Or using system package manager
-sudo apt-get install python3-numpy python3-yaml  # Debian/Ubuntu
-sudo yum install python3-numpy python3-PyYAML   # RHEL/CentOS
+# Or using requirements.txt
+pip3 install -r requirements.txt
+
+# Or using system package manager  
+sudo apt-get install python3-numpy python3-yaml  # Debian/Ubuntu (zstandard via pip)
+sudo yum install python3-numpy python3-PyYAML   # RHEL/CentOS (zstandard via pip)
 ```
 
-**Note:** The performance monitoring tools (`monitor.py`, `compare.py`, etc.) require additional packages (`psutil`, `pandas`, `matplotlib`) but are not needed for the core Controller functionality.
+**Note:** The performance monitoring tools (`monitor.py`, `compare.py`, etc.) require additional packages (`pandas`, `matplotlib`) but are not needed for the core Controller functionality.

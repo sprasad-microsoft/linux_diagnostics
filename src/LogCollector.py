@@ -4,6 +4,7 @@ import tarfile
 import shutil
 import time
 import os
+import zstandard as zstd
 
 from handlers.JournalctlQuickAction import JournalctlQuickAction
 from handlers.CifsstatsQuickAction import CifsstatsQuickAction
@@ -64,8 +65,7 @@ class LogCollector:
 
     async def _create_log_collection_task(self, anomaly_event) -> None:
         """ here we wait for the logs to be collected.
-        After that, we should compress the logs. In reality, compression would
-        be offloaded to the compression worker thread. """
+        After that, we should compress the logs using zstd for faster compression. """
         if __debug__:
             logger.info("Collecting logs for anomaly event %s", anomaly_event)
         anomaly_type = anomaly_event["anomaly"]
@@ -74,10 +74,15 @@ class LogCollector:
             *[handler.execute(batch_id) for handler in self.handlers[anomaly_type]]
         )
         output_path = self.handlers[anomaly_type][0].get_output_dir(batch_id)
-        tar_path = f"{output_path}.tar.gz"
-        # Compress the logs using tar + gzip
-        with tarfile.open(tar_path, "w:gz") as tar:
-            tar.add(output_path, arcname=os.path.basename(output_path))
+        
+        # Compress the logs using tar + zstd (faster than gzip)
+        tar_path = f"{output_path}.tar.zst"
+        with open(tar_path, 'wb') as f:
+            cctx = zstd.ZstdCompressor(level=3)  # Level 3 for good speed/compression balance
+            with cctx.stream_writer(f) as writer:
+                with tarfile.open(fileobj=writer, mode='w|') as tar:
+                    tar.add(output_path, arcname=os.path.basename(output_path))
+        
         shutil.rmtree(output_path)
 
     async def _create_log_collection_task_with_limit(self, anomaly_event, semaphore: asyncio.Semaphore) -> None:
