@@ -23,6 +23,7 @@ from EventDispatcher import EventDispatcher
 from AnomalyWatcher import AnomalyWatcher
 from LogCollector import LogCollector
 from SpaceWatcher import SpaceWatcher
+from utils.pdeathsig_wrapper import pdeathsig_preexec
 
 logger = logging.getLogger(__name__)
 
@@ -57,9 +58,9 @@ class Controller:
         self.eventQueue = queue.Queue()
         self.anomalyActionQueue = queue.Queue()
         self.tool_processes = {}
-        self.tool_starters = {
-            "smbslower": self.start_smbsloweraod,
-            # "smbiosnoop": self.start_smbiosnoop,
+        self.tool_cmd_builders = {
+            "smbslower": self._get_smbsloweraod_cmd,
+            # "smbiosnoop": self._get_smbiosnoop_cmd,
         }
 
         # Initialize all components
@@ -97,11 +98,16 @@ class Controller:
             logger.info("Started thread %s with ID %d", thread_name, t.ident)
         self.threads.append(t)
 
-    def _supervise_process(self, process_name: str, start_func: callable) -> None:
+    def _supervise_process(self, process_name: str, cmd_builder: callable) -> None:
         """Supervise a process, restarting it if it exits unexpectedly."""
-        set_thread_name("SmbslowerSupervisor") #only to view thread name in top
+        set_thread_name("ProcessSupervisor") #only to view thread name in top
         while not self.stop_event.is_set():
-            process = start_func()
+            cmd = cmd_builder()
+            process = subprocess.Popen(
+                cmd,
+                start_new_session=True,
+                preexec_fn=pdeathsig_preexec
+            )
             self.tool_processes[process_name] = process
             if __debug__:
                 logger.info("Started %s process with PID %d", process_name, process.pid)
@@ -125,28 +131,21 @@ class Controller:
                 break
             time.sleep(1)
 
-    def _get_smbsloweraod_args(self) -> tuple[int, str]:
-        """Get arguments for the smbsloweraod process based on the latency
+    def _get_smbsloweraod_cmd(self) -> list[str]:
+        """Get command array for the smbsloweraod process based on the latency
         anomaly config."""
         latency_anomaly = self.config.guardian.anomalies.get("latency")
         if latency_anomaly is None:
-            return 10, list(ALL_SMB_CMDS.values())  # Default threshold is 10
-
-        min_threshold = min(list(latency_anomaly.track.values()))
-
-        # track_cmds: list of all SMB commands we want to track, as numbers, comma-separated
-        smbcmds = [str(cmd_id) for cmd_id, threshold in latency_anomaly.track.items()]
-        track_cmds = ",".join(smbcmds)
-        return min_threshold, track_cmds
-
-    def start_smbsloweraod(self) -> subprocess.Popen:
-        """Start the smbsloweraod process and return the process object."""
+            min_threshold = 10
+            track_cmds = ",".join(str(cmd_id) for cmd_id in ALL_SMB_CMDS.keys())
+        else:
+            min_threshold = min(list(latency_anomaly.track.values()))
+            # track_cmds: list of all SMB commands we want to track, as numbers, comma-separated
+            smbcmds = [str(cmd_id) for cmd_id, threshold in latency_anomaly.track.items()]
+            track_cmds = ",".join(smbcmds)
+        
         ebpf_binary_path = os.path.join(os.path.dirname(__file__), "bin", "smbsloweraod")
-        min_threshold, track_cmds = self._get_smbsloweraod_args()
-        return subprocess.Popen(
-            [ebpf_binary_path, "-m", str(min_threshold), "-c", track_cmds],
-            start_new_session=True,
-        )
+        return [ebpf_binary_path, "-m", str(min_threshold), "-c", track_cmds]
 
     def stop(self) -> None:
         """Signal all threads and processes to stop."""
@@ -186,18 +185,18 @@ class Controller:
         if __debug__:
             logger.info("Starting tools: %s", tool_names)
         for tool_name in tool_names:
-            start_func = self.tool_starters.get(tool_name)
-            if start_func:
+            cmd_builder = self.tool_cmd_builders.get(tool_name)
+            if cmd_builder:
                 t = threading.Thread(
                     target=self._supervise_process,
-                    args=(tool_name, start_func),
+                    args=(tool_name, cmd_builder),
                     name=f"{tool_name}_Supervisor",
                     daemon=True,
                 )
                 t.start()
                 self.threads.append(t)
             else:
-                logger.warning("No start function defined for tool '%s'", tool_name)
+                logger.warning("No command builder defined for tool '%s'", tool_name)
 
         self._supervise_thread("EventDispatcher", self.event_dispatcher.run)
         self._supervise_thread("AnomalyWatcher", self.anomaly_watcher.run)

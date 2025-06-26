@@ -18,9 +18,11 @@ AODv2 implements a sophisticated multi-threaded architecture designed for high-p
 
 ### Core Components
 
+AODv2 consists of several components, with the `EventDispatcher`, `AnomalyWatcher`, `LogCollector`, and `SpaceWatcher` each running in a dedicated thread for concurrent processing.
+
 - **ConfigManager**: Validates and parses the configuration YAML into Python dataclasses, providing runtime access to configuration throughout the system.
 
-- **Controller**: The main orchestrator running in the primary process (not a thread). Manages startup, configuration, and shutdown of the AODv2 service. It coordinates all components and ensures the service runs under desired constraints. Supervises thread execution with automatic restart capabilities for failed threads/processes.
+- **Controller**: The main orchestrator running in the primary process. It manages the startup, configuration, and graceful shutdown of the AODv2 service. It coordinates all components, supervises thread execution with automatic restart capabilities, and ensures a smooth shutdown process by signaling all threads to terminate and cleaning up resources.
 
 - **EventDispatcher**: Polls the C ring buffer and drains all events from eBPF tools. Parses raw C structs into Python numpy struct arrays and sends them to the `eventQueue`. Runs in a dedicated thread with exception handling that propagates failures to the Controller for automatic restart.
 
@@ -28,11 +30,9 @@ AODv2 implements a sophisticated multi-threaded architecture designed for high-p
 
 - **LogCollector**: Consumes the `anomalyActionQueue` using an async event loop. For each anomaly event, it executes QuickActions using an async semaphore-bounded task system (`max_concurrent_tasks=4`) rather than a traditional threadpool. Compresses collected logs using fast zstd compression.
 
-- **SpaceWatcher**: Autonomous cleanup service with configurable intervals (default: 60 seconds). Monitors disk usage and performs intelligent cleanup:
-  - **Size-based cleanup**: Triggers when usage exceeds 90% of configured limit
-  - **Age-based cleanup**: Removes logs older than `max_log_age_days` 
-  - **Emergency mode**: More aggressive cleanup (80% threshold) when usage exceeds 95%
-  - **Race condition prevention**: Only counts completed `.tar.zst` files for space calculations
+- **SpaceWatcher**: An autonomous cleanup service that periodically monitors disk usage. It performs cleanup based on two main strategies:
+  - **Size-based cleanup**: Triggers when total log size exceeds a configured limit.
+  - **Age-based cleanup**: Removes logs older than a configured maximum age.
 
 ### Component Communication
 
@@ -59,7 +59,7 @@ The `timestamp` field serves dual purposes:
 
 Each component runs in its own dedicated thread with proper lifecycle management:
 - Graceful startup sequencing with dependency resolution
-- Coordinated shutdown with cleanup and resource deallocation
+- **Graceful Shutdown**: On shutdown, the Controller sends sentinel values (e.g., `None`) to all queues, signaling consumer threads to stop processing. It then waits for all threads to join, ensuring that all in-flight events are processed and resources are cleaned up properly before exiting.
 - Signal handling for service control and emergency stops
 - Thread naming for easy identification in system monitoring tools
 - Automatic restart of threads/processes if they stop unexpectedly
@@ -72,8 +72,6 @@ AODv2's real-time processing system is built around an efficient event streaming
 
 **eBPF Monitoring Tools**:
 - `smbsloweraod`: Kernel-level SMB command latency monitoring with microsecond precision
-- `smbiosnoop`: Real-time SMB I/O and error code tracking  
-- Custom eBPF programs for specific monitoring requirements
 
 **Shared Memory Ring Buffer**:
 - Zero-copy event transfer from kernel eBPF to user space
@@ -83,8 +81,8 @@ AODv2's real-time processing system is built around an efficient event streaming
 ### Stream Processing
 
 **Event Flow**:
-1. **Kernel Events**: eBPF programs capture SMB operations and write to shared memory ring buffer
-2. **EventDispatcher**: Polls ring buffer, converts C structs to numpy arrays, queues events
+1. **Kernel Events**: eBPF programs capture SMB operations and write to the shared memory ring buffer.
+2. **EventDispatcher**: Polls the ring buffer, converts C structs to numpy arrays, and queues events.
 3. **Batch Processing**: AnomalyWatcher processes events in configurable intervals (`watch_interval_sec`)
 4. **Anomaly Analysis**: Specialized handlers analyze events against thresholds
 5. **Action Triggering**: Anomaly events queued for diagnostic collection
@@ -120,55 +118,39 @@ AODv2's real-time processing system is built around an efficient event streaming
 ```
 linux_diagnostics/
 ├── src/                          # Core application source code
-│   ├── Controller.py             # Main service controller
+│   ├── Controller.py             # Main service controller and orchestrator
 │   ├── AnomalyWatcher.py         # Anomaly detection engine
-│   ├── EventDispatcher.py       # Event routing and processing
-│   ├── LogCollector.py           # Diagnostic data collection
+│   ├── EventDispatcher.py        # Event routing from eBPF to Python
+│   ├── LogCollector.py           # Diagnostic data collection and compression
 │   ├── SpaceWatcher.py           # Disk usage monitoring and cleanup
-│   ├── ConfigManager.py          # Configuration management
-│   ├── shared_data.py            # Shared constants and data structures
-│   ├── base/                     # Base classes and interfaces
-│   │   ├── AnomalyHandlerBase.py # Abstract anomaly handler
-│   │   └── QuickAction.py        # Base class for diagnostic actions
-│   ├── handlers/                 # Anomaly handlers and quick actions
-│   │   ├── latency_anomaly_handler.py    # Latency anomaly detection
-│   │   ├── error_anomaly_handler.py      # Error anomaly detection
-│   │   ├── DmesgQuickAction.py           # Kernel message collection
-│   │   ├── JournalctlQuickAction.py      # System journal collection
-│   │   ├── CifsstatsQuickAction.py       # CIFS statistics
-│   │   ├── SmbinfoQuickAction.py         # SMB connection info
-│   │   ├── MountsQuickAction.py          # Mount point information
-│   │   ├── SysLogsQuickAction.py         # System log collection
-│   │   └── DebugDataQuickAction.py       # Debug data aggregation
-│   ├── utils/                    # Utility modules
-│   │   ├── anomaly_type.py       # Anomaly type definitions
-│   │   └── config_schema.py      # Configuration validation
-│   └── bin/                      # Binary tools
-│       └── smbsloweraod          # eBPF SMB latency monitor
+│   ├── ConfigManager.py          # Configuration loading and validation
+│   ├── shared_data.py            # Shared constants (e.g., SMB commands, error codes)
+│   ├── base/                     # Abstract base classes for core components
+│   │   ├── AnomalyHandlerBase.py # Interface for anomaly handlers
+│   │   └── QuickAction.py        # Interface for diagnostic actions
+│   ├── handlers/                 # Concrete implementations of handlers and actions
+│   │   ├── latency_anomaly_handler.py    # Logic for latency anomaly detection
+│   │   ├── error_anomaly_handler.py      # Logic for error anomaly detection
+│   │   └── ...                   # Implementations of all QuickActions
+│   ├── utils/                    # Utility modules and helper functions
+│   │   ├── anomaly_type.py       # Enum for anomaly types
+│   │   └── config_schema.py      # Dataclasses for configuration schema
+│   └── bin/                      # Compiled eBPF binaries
+│       └── smbsloweraod          # eBPF tool for monitoring SMB latency
 ├── config/                       # Configuration files
-│   └── config.yaml               # Main configuration file
-├── packages/                     # Package building scripts
-│   ├── debian/                   # Debian package files
-│   │   ├── control               # Package metadata
-│   │   ├── postinst              # Post-installation script
-│   │   ├── prerm                 # Pre-removal script
-│   │   └── rules                 # Build rules
-│   └── rpm/                      # RPM package files
-│       ├── linux_diagnostics.spec    # RPM specification
-│       ├── postinstall.sh        # Post-installation script
-│       └── preuninstall.sh       # Pre-uninstallation script
-├── tests/                        # Unit tests
-├── linux_diagnostics.service    # Systemd service file
-├── Makefile                      # Build automation
-├── pyproject.toml               # Python project configuration
-├── monitor.py                   # System resource monitoring script
-├── disk_monitor.py              # Disk usage monitoring script
-├── compare.py                   # Performance comparison tool
-├── disk_plot.py                 # Disk usage visualization
-└── README.md                    # This file
+│   └── config.yaml               # Main configuration file (user-editable)
+├── packages/                     # Package building scripts (DEB and RPM)
+├── tests/                        # Test suite for the application
+│   ├── test_controller.py        # Unit tests for the Controller
+│   └── ...                       # Other unit and integration tests
+├── linux_diagnostics.service     # Systemd service definition file
+├── Makefile                      # Build automation for packages and code quality
+├── pyproject.toml                # Python project configuration (PEP 621)
+├── USAGE.md                      # Detailed usage and configuration guide
+└── README.md                     # This file (overview and architecture)
 ```
 
-## 🚀 Quick Start
+## 🚀 Getting Started
 
 ### Installation
 
@@ -196,22 +178,14 @@ sudo rpm -ivh ~/rpmbuild/RPMS/noarch/linux_diagnostics-1.0-1.noarch.rpm
 git clone <repository-url>
 cd linux_diagnostics
 
-# Install dependencies
-pip3 install -r requirements.txt
+# Install dependencies from pyproject.toml
+pip3 install .
 
-# Configure (edit config/config.yaml as needed)
-sudo mkdir -p /var/log/aod
-sudo mkdir -p /var/run/linux_diagnostics
-
-# Copy files to system locations
-sudo cp src/* /usr/bin/
+# Configure (see configuration section below) and install the service
 sudo cp config/config.yaml /etc/linux_diagnostics/
 sudo cp linux_diagnostics.service /etc/systemd/system/
-
-# Enable and start service
 sudo systemctl daemon-reload
 sudo systemctl enable linux_diagnostics.service
-sudo systemctl start linux_diagnostics.service
 ```
 
 ### Basic Usage
@@ -236,483 +210,98 @@ sudo journalctl -u linux_diagnostics.service -f
 sudo systemctl stop linux_diagnostics.service
 ```
 
-## 📊 Monitoring & Analysis Tools
-
-The AODv2 system includes several standalone tools for performance monitoring and data analysis:
-
-### System Resource Monitoring
-
-**monitor.py** - Real-time system resource monitoring
-```bash
-# Monitor system resources (CPU, memory, disk I/O)
-python3 monitor.py [duration_seconds] [interval_seconds]
-
-# Examples
-python3 monitor.py 300 1      # Monitor for 5 minutes, 1-second intervals
-python3 monitor.py 60         # Monitor for 1 minute, default interval
-```
-
-**disk_monitor.py** - Disk usage monitoring and plotting
-```bash
-# Monitor disk usage with visual output
-python3 disk_monitor.py [duration_seconds] [device_path]
-
-# Examples  
-python3 disk_monitor.py 300 /dev/sda    # Monitor /dev/sda for 5 minutes
-python3 disk_monitor.py 120             # Monitor default device for 2 minutes
-```
-
-### Performance Comparison and Analysis
-
-**csv_range_compare.py** - Advanced range-based CSV comparison
-```bash
-# Compare two CSV files with range-based analysis (0-200s, 200-500s, 500-600s)
-python3 csv_range_compare.py file1.csv file2.csv [column_name]
-
-# Examples
-python3 csv_range_compare.py baseline.csv test.csv                    # Analyze both CPU and Memory
-python3 csv_range_compare.py without_aod.csv with_aod.csv CPU_Percent # Analyze specific column
-python3 csv_range_compare.py data1.csv data2.csv Memory_Percent       # Memory-specific analysis
-```
-
-Features:
-- **Automatic column detection**: Finds CPU and Memory columns automatically
-- **Range-based analysis**: Separate statistics for different time periods
-- **Visual comparisons**: Generates detailed plots for each range
-- **Comprehensive metrics**: Average, max, min, standard deviation, and percentage changes
-- **Flexible input**: Supports various timestamp formats and column naming
-
-**compare.py** - Basic CSV comparison and visualization
-```bash
-# Compare two monitoring CSV files
-python3 compare.py file1.csv file2.csv
-
-# Generates comparison graphs and statistics
-```
-
-**disk_plot.py** - Disk usage trend visualization
-```bash
-# Create disk usage plots from monitoring data
-python3 disk_plot.py monitoring_data.csv
-```
-
-### Sample Data Generation
-
-**generate_sample_csvs.py** - Create test data for analysis
-```bash
-# Generate sample CSV files for testing comparison tools
-python3 generate_sample_csvs.py
-
-# Creates baseline_sample.csv and test_sample.csv with realistic performance data
-```
-
-### Tool Dependencies
-
-Install required Python packages:
-```bash
-pip3 install -r requirements.txt
-
-# Or install individually:
-pip3 install pandas matplotlib numpy zstandard PyYAML
-```
-
-### Performance Optimizations
-
-- **Zstd Compression**: AODv2 uses Zstandard compression for log archives, providing faster compression and decompression compared to gzip while maintaining excellent compression ratios
-- **Range-based Analysis**: The comparison tools support time-range analysis to identify performance changes during specific periods
-- **Memory Efficient**: All monitoring tools use streaming data processing to handle large datasets
-
 ## ⚙️ Configuration
 
-The main configuration file is located at `config/config.yaml`. Key sections include:
+The main configuration file is located at `config/config.yaml`. Below is an example demonstrating key sections. The configuration is loaded and validated at startup.
 
-### Basic Settings
 ```yaml
-watch_interval_sec: 1          # Monitoring frequency
-aod_output_dir: /var/log/aod   # Output directory for logs
-```
+# Monitoring frequency and log output directory
+watch_interval_sec: 1
+aod_output_dir: /var/log/aod
 
-### Anomaly Detection
-```yaml
+# --- Anomaly Detection ---
 guardian:
   anomalies:
+    # Latency anomaly detection
     latency:
       type: "Latency"
       tool: "smbslower"
-      acceptable_count: 10        # Anomaly threshold
-      default_threshold_ms: 10    # Default latency threshold
-      track_commands:             # Commands to monitor
-        - command: SMB2_READ
-          threshold: 8            # Custom threshold in ms
+      mode: "all"
+      acceptable_count: 10
+      default_threshold_ms: 20
+      track_commands:
         - command: SMB2_WRITE
-          threshold: 12
-    
+          threshold: 50
+      actions:
+        - dmesg
+        - journalctl
+        - debugdata
+        - stats
+        - mounts
+        - smbinfo
+        - syslogs
+
+    # Error anomaly detection
     error:
       type: "Error"
       tool: "smbiosnoop"
-      acceptable_count: 10        # Error rate threshold
-      track_codes:                # Error codes to monitor
+      mode: "trackonly"
+      acceptable_count: 10
+      track_codes:
         - EACCES
+        - EAGAIN
         - EIO
-```
+      actions:
+        - dmesg
+        - journalctl
 
-### Cleanup Settings
-```yaml
-cleanup:
-  cleanup_interval_sec: 60       # Cleanup check frequency (default: 60 seconds)
-  max_log_age_days: 2           # Maximum log retention (default: 2 days)
-  max_total_log_size_mb: 200    # Maximum total log size (default: 200 MB)
-  aod_output_dir: /var/log/aod  # Output directory for log storage
-```
-
-**SpaceWatcher Behavior**:
-- **Normal Operation**: Checks every `cleanup_interval_sec` seconds
-- **Size Trigger**: Cleanup when usage exceeds 90% of `max_total_log_size_mb`
-- **Emergency Mode**: More aggressive cleanup (80% threshold) when usage exceeds 95%
-- **Age Cleanup**: Removes logs older than `max_log_age_days` days
-- **Emergency Frequency**: Checks 4x more frequently during emergency conditions
-- **File Types**: Only counts completed `.tar.zst` files (prevents race conditions)
-
-### Diagnostic Actions
-```yaml
+# --- QuickActions ---
+# Defines the complete list of available diagnostic actions.
 watcher:
-  actions:                      # Available diagnostic actions
-    - dmesg                     # Kernel messages
-    - journalctl                # System journal
-    - debugdata                 # Debug information
-    - stats                     # CIFS statistics
-    - mounts                    # Mount information
-    - smbinfo                   # SMB connection details
-    - syslogs                   # System logs
+  actions:
+    - tcpdump
+    - dmesg
+    - journalctl
+    - debugdata
+    - stats
+
+# --- Log Cleanup ---
+cleanup:
+  cleanup_interval_sec: 60
+  max_log_age_days: 2
+  max_total_log_size_mb: 0.5
+
+# --- Auditing ---
+audit:
+  enabled: true
 ```
 
-## 🔧 Performance Monitoring Tools
-
-The repository includes standalone monitoring tools for performance analysis:
-
-### System Resource Monitor (`monitor.py`)
-
-Monitor CPU and memory usage over time:
-
-```bash
-# Monitor for 5 minutes (default)
-python3 monitor.py
-
-# Monitor for 10 minutes with 2-second intervals
-python3 monitor.py 2 10
-
-# Monitor for 30 minutes with 5-second intervals  
-python3 monitor.py 5 30
-```
-
-**Output:** `system_usage_YYYYMMDD_HHMMSS.csv`
-
-### Disk Usage Monitor (`disk_monitor.py`)
-
-Monitor AOD log directory growth:
-
-```bash
-# Monitor every 5 seconds indefinitely
-python3 disk_monitor.py
-
-# Monitor every 10 seconds for 30 minutes
-python3 disk_monitor.py 10 30
-
-# Quick 5-minute test
-python3 disk_monitor.py 2 5
-```
-
-**Output:** `disk_usage_YYYYMMDD_HHMMSS.csv`
-
-### Performance Comparison (`compare.py`)
-
-Generate side-by-side performance comparisons:
-
-```bash
-# Compare two system monitoring runs
-python3 compare.py system_usage_baseline.csv system_usage_with_aod.csv
-
-# Compare CPU and memory usage patterns
-python3 compare.py run1.csv run2.csv
-```
-
-**Output:** `comparison_graph.png` with statistics
-
-### Disk Usage Visualization (`disk_plot.py`)
-
-Visualize disk usage growth over time:
-
-```bash
-# Plot single monitoring session
-python3 disk_plot.py disk_usage_20241224_120000.csv
-
-# Compare disk usage between two sessions
-python3 disk_plot.py disk_baseline.csv disk_with_aod.csv
-```
-
-**Output:** `disk_usage_plot.png` or `disk_usage_comparison.png`
-
-## 📊 Performance Testing Workflow
-
-### Complete AOD Impact Analysis
-
-```bash
-# 1. Baseline measurement (without AOD)
-sudo systemctl stop linux_diagnostics.service
-python3 monitor.py 10 10  # 10s intervals, 10 minutes
-# Save as: baseline_cpu.csv
-
-# 2. With AOD monitoring  
-sudo systemctl start linux_diagnostics.service
-python3 disk_monitor.py 5 15  # Monitor disk growth
-python3 monitor.py 10 10      # Monitor CPU/memory
-# Save as: with_aod_disk.csv, with_aod_cpu.csv
-
-# 3. Post-AOD measurement
-sudo systemctl stop linux_diagnostics.service  
-python3 monitor.py 10 10      # Final measurement
-# Save as: post_aod_cpu.csv
-
-# 4. Generate comparison reports
-python3 compare.py baseline_cpu.csv with_aod_cpu.csv
-python3 disk_plot.py with_aod_disk.csv
-```
-
-### Automated Testing Script
-
-Use the provided `run_experiment.sh` script for automated testing:
-
-```bash
-# Make script executable
-chmod +x run_experiment.sh
-
-# Run automated experiment with custom workload
-./run_experiment.sh -w "stress --cpu 4 --timeout 600s" -d 10 -k 15
-
-# Run with file operations workload
-./run_experiment.sh -w "find /var/log -name '*.log' | xargs grep -i error" -d 5
-```
-
-The script automatically:
-- Runs baseline measurements without AOD
-- Starts AOD and measures impact
-- Stops AOD and measures recovery
-- Generates comparison graphs and statistics
-- Creates comprehensive reports
-
-## 🔍 Monitoring and Troubleshooting
-
-### Log Locations
-
-- **Service Logs:** `journalctl -u linux_diagnostics.service`
-- **AOD Output:** `/var/log/aod/batches/`
-- **Diagnostic Data:** `/var/log/aod/batches/aod_TIMESTAMP/`
-
-### Common Issues
-
-**Permission Errors:**
-```bash
-# Ensure proper permissions
-sudo chown -R root:root /var/log/aod
-sudo chmod 755 /var/log/aod
-```
-
-**Service Won't Start:**
-```bash
-# Check configuration
-sudo python3 -c "import yaml; yaml.safe_load(open('/etc/linux_diagnostics/config.yaml'))"
-
-# Check dependencies
-sudo python3 -c "import numpy, yaml"
-```
-
-**High Disk Usage:**
-```bash
-# Check current disk usage
-du -sh /var/log/aod/batches/
-
-# Manual cleanup if needed
-sudo systemctl stop linux_diagnostics.service
-sudo rm -rf /var/log/aod/batches/aod_*
-sudo systemctl start linux_diagnostics.service
-```
-
-### Performance Metrics
-
-Monitor AOD's own performance impact:
-
-```bash
-# CPU usage by AOD processes
-ps aux | grep linux_diagnostics
-
-# Memory usage
-sudo systemctl status linux_diagnostics.service
-
-# Disk I/O impact
-sudo iotop -a -o -d 1
-
-# Network impact (if using remote logging)
-sudo nethogs
-```
-
-## 🧪 Testing
-
-Run the test suite:
-
-```bash
-# Run all tests
-python3 -m pytest tests/
-
-# Run specific test modules
-python3 -m pytest tests/test_controller.py -v
-
-# Run with coverage
-python3 -m pytest tests/ --cov=src --cov-report=html
-```
-
-### Test Categories
-
-- **Unit Tests:** Individual component testing
-- **Integration Tests:** Cross-component functionality
-- **Performance Tests:** Resource usage validation
-- **Configuration Tests:** Config validation and edge cases
-
-## 📦 Building Packages
-
-### Prerequisites
-
-**Debian/Ubuntu:**
-```bash
-sudo apt-get install build-essential devscripts debhelper
-```
-
-**RHEL/CentOS/Fedora:**
-```bash
-sudo yum install rpm-build rpmlint
-# or
-sudo dnf install rpm-build rpmlint
-```
-
-### Build Commands
-
-```bash
-# Build both packages
-make all
-
-# Build only DEB package
-make debian
-
-# Build only RPM package  
-make rpm
-
-# Clean build artifacts
-make clean
-```
-
-### Package Contents
-
-Both packages include:
-- Service binary and modules
-- Configuration files
-- Systemd service file
-- eBPF monitoring tools
-- Documentation
-- Log directories
-
-## 🔧 Development
-
-### Code Style
-
-The project uses Black for code formatting:
-
-```bash
-# Format code
-black src/ tests/ *.py
-
-# Check formatting
-black --check src/ tests/ *.py
-```
-
-### Adding New Anomaly Handlers
-
-1. Create handler in `src/handlers/`:
-```python
-from base.AnomalyHandlerBase import AnomalyHandler
-
-class MyAnomalyHandler(AnomalyHandler):
-    def detect(self, events_batch):
-        # Implementation here
-        return anomaly_detected
-```
-
-2. Register in `AnomalyWatcher.py`:
-```python
-ANOMALY_HANDLER_REGISTRY = {
-    AnomalyType.MY_TYPE: MyAnomalyHandler,
-    # ...
-}
-```
-
-3. Add configuration schema to `config_schema.py`
-
-### Adding New Quick Actions
-
-1. Create action in `src/handlers/`:
-```python
-from base.QuickAction import QuickAction
-
-class MyQuickAction(QuickAction):
-    def collect(self):
-        # Implementation here
-        return collected_data
-```
-
-2. Register in `EventDispatcher.py`
-
-## 📋 System Requirements
-
-### Minimum Requirements
-
-- **OS:** Linux kernel 4.18+ (for eBPF support)
-- **Python:** 3.8+
-- **Memory:** 512MB RAM
-- **Storage:** 1GB free space for logs
-- **Privileges:** Root access for system monitoring
-
-### Dependencies
-
-The Controller and its components require only these Python packages:
-
-**Core Dependencies:**
-- `numpy` - Used by anomaly handlers for efficient event processing
-- `PyYAML` - Configuration file parsing (ConfigManager)
-- `zstandard` - Fast compression library for log archives (replaces gzip for better performance)
-
-**Standard Library Modules Used:**
-- `threading`, `queue` - Concurrency and communication
-- `subprocess`, `os`, `signal` - System interaction
-- `logging` - Logging infrastructure  
-- `time`, `pathlib` - Basic utilities
-- `ctypes` - Low-level system calls
-- `asyncio`, `tarfile` - Async operations and file handling
-
-**System Tools Required:**
-- `systemctl` - Service management
-- `journalctl` - System journal access
-- eBPF tools (provided in `src/bin/`)
-
-### Installation
-
-```bash
-# Install core dependencies
-pip3 install numpy PyYAML zstandard
-
-# Or using requirements.txt
-pip3 install -r requirements.txt
-
-# Or using system package manager  
-sudo apt-get install python3-numpy python3-yaml  # Debian/Ubuntu (zstandard via pip)
-sudo yum install python3-numpy python3-PyYAML   # RHEL/CentOS (zstandard via pip)
-```
-
-**Note:** The performance monitoring tools (`monitor.py`, `compare.py`, etc.) require additional packages (`pandas`, `matplotlib`) but are not needed for the core Controller functionality.
+### Configuration Explained
+
+- **`watch_interval_sec`**: The frequency in seconds at which the `AnomalyWatcher` checks for new events. A lower value means faster detection but slightly higher CPU usage.
+- **`aod_output_dir`**: The root directory where all diagnostic logs and collected data are stored.
+
+- **`guardian`**: The main section for configuring all anomaly detection logic.
+  - **`anomalies`**: A dictionary defining each specific anomaly to monitor.
+    - **`type`**: Maps to a specific `AnomalyHandler` class (e.g., `"Latency"` maps to `LatencyAnomalyHandler`).
+    - **`tool`**: The name of the eBPF executable that generates the monitoring data for this anomaly.
+    - **`mode`**: Determines how events are filtered. `"all"` tracks everything, `"trackonly"` only includes items in the `track_` list, and `"excludeonly"` ignores them.
+    - **`acceptable_count`**: The threshold for triggering an anomaly. For example, if more than 10 latency events occur in a `watch_interval_sec`, an anomaly is declared.
+    - **`default_threshold_ms`**: (For latency) The default latency in milliseconds that is considered acceptable if a command-specific threshold is not set.
+    - **`track_commands` / `track_codes`**: A list of specific SMB commands or error codes to monitor, often with custom thresholds.
+    - **`actions`**: A list of `QuickActions` to execute *specifically* when this anomaly is triggered. These must be names defined in the global `watcher.actions` list.
+
+- **`watcher`**: This section defines the master list of all available `QuickActions`.
+  - **`actions`**: A complete list of all diagnostic actions (e.g., `dmesg`, `tcpdump`) that are available to be triggered by any anomaly. This list populates the available actions that can be referenced under `guardian.anomalies`.
+
+- **`cleanup`**: Configures the `SpaceWatcher` for automated log management.
+  - **`cleanup_interval_sec`**: How often the cleanup process runs.
+  - **`max_log_age_days`**: The maximum number of days to keep log files before they are deleted.
+  - **`max_total_log_size_mb`**: The maximum total size of the `aod_output_dir`. If this limit is exceeded, the oldest logs are deleted until the total size is under the limit.
+
+- **`audit`**: Contains settings for internal system auditing.
+  - **`enabled`**: If `true`, enables detailed logging for debugging and auditing the AOD system itself.
+
+## 🚀 Advanced Usage and Development
+
+For detailed instructions on performance testing, troubleshooting, and extending the system, please refer to the comprehensive **[USAGE.md](USAGE.md)** guide.
