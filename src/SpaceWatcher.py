@@ -22,23 +22,21 @@ class SpaceWatcher:
         self.controller = controller
         cleanup_config = controller.config.cleanup
         self.max_log_age_days = cleanup_config.get("max_log_age_days", 2)  # Default to 2 days if not set
-        self.max_total_log_suze_mb = cleanup_config.get("max_total_log_size_mb", 200)  # Default to 200 MB if not set
+        self.max_total_log_size_mb = cleanup_config.get("max_total_log_size_mb", 200)  # Default to 200 MB if not set
         self.cleanup_interval = cleanup_config.get("cleanup_interval_sec", 60)  # Default to 60 sec if not set
         self.aod_output_dir = cleanup_config.get(
             "aod_output_dir", "/var/log/aod"
         )  # Default to /var/log/aod if not set
         self.batches_dir = Path(os.path.join(self.aod_output_dir, "batches"))
         self.last_full_cleanup = time.time()
-        self.emergency_mode = False  # Track if we're in emergency cleanup mode
         
         # Metrics tracking
         if __debug__:
             self.cleanup_runs = 0
             self.total_files_deleted = 0
             self.total_space_freed_mb = 0
-            self.emergency_cleanups = 0
-            logger.info("SpaceWatcher initialized: max_size=%dMB, max_age=%d days, cleanup_interval=%ds", 
-                       self.max_total_log_suze_mb, self.max_log_age_days, self.cleanup_interval)
+            logger.info("SpaceWatcher initialized: max_size=%.2fMB, max_age=%d days, cleanup_interval=%ds", 
+                       self.max_total_log_size_mb, self.max_log_age_days, self.cleanup_interval)
 
     def run(self) -> None:
         """Periodically checks disk space and triggers cleanup if needed."""
@@ -54,11 +52,7 @@ class SpaceWatcher:
                 logger.error("SpaceWatcher cleanup failed: %s", e)
                 if __debug__:
                     logger.debug("Full traceback:", exc_info=True)
-                # Continue running despite cleanup failure
-            
-            # In emergency mode, check more frequently
-            sleep_time = self.cleanup_interval // 4 if self.emergency_mode else self.cleanup_interval
-            time.sleep(sleep_time)
+            time.sleep(self.cleanup_interval)
 
     def _full_cleanup_needed(self) -> bool:
         """Check if current time  > last_full_cleanup + max_log_age_days."""
@@ -75,31 +69,15 @@ class SpaceWatcher:
         try:
             total_size = sum(f.stat().st_size for f in self.batches_dir.glob("**/*.tar.zst") if f.is_file())
             total_size_mb = total_size / (1024 * 1024)
-            max_size_mb = self.max_total_log_suze_mb
-            
-            # Emergency mode: disk is critically full (95% of limit)
-            if total_size > 0.95 * max_size_mb * 1024 * 1024:
-                if not self.emergency_mode:
-                    self.emergency_mode = True
-                    logger.critical("EMERGENCY: Disk usage %.2f MB exceeds 95%% of limit (%d MB). Entering aggressive cleanup mode.", 
-                                  total_size_mb, max_size_mb)
-                    if __debug__:
-                        self.emergency_cleanups += 1
-                return True
-            
+            max_size_mb = self.max_total_log_size_mb
+
             # Normal warning mode: disk approaching full (90% of limit)
-            elif total_size > 0.9 * max_size_mb * 1024 * 1024:
-                if self.emergency_mode:
-                    self.emergency_mode = False
-                    logger.info("Exiting emergency cleanup mode. Disk usage: %.2f MB", total_size_mb)
-                logger.warning("Total log size %.2f MB exceeds 90%% of max %d MB", total_size_mb, max_size_mb)
+            if total_size > 0.9 * max_size_mb * 1024 * 1024:
+                logger.warning("Total log size %.2f MB exceeds 90%% of max %.2f MB", total_size_mb, max_size_mb)
                 return True
             
             # Normal operation
             else:
-                if self.emergency_mode:
-                    self.emergency_mode = False
-                    logger.info("Exiting emergency cleanup mode. Disk usage: %.2f MB", total_size_mb)
                 return False
                 
         except (FileNotFoundError, PermissionError, OSError) as e:
@@ -153,7 +131,7 @@ class SpaceWatcher:
                 logger.debug("Full traceback:", exc_info=True)
 
     def cleanup_by_size(self) -> None:
-        """Delete oldest files or directories starting with aod_ until total size is under max_total_log_suze_mb."""
+        """Delete oldest files or directories starting with aod_ until total size is under max_total_log_size_mb."""
         try:
             entries = list(self.batches_dir.glob("aod_*"))
             if not entries:
@@ -176,19 +154,17 @@ class SpaceWatcher:
                     return 0
 
             total_size = sum(entry_size(e) for e in entries)
-            max_allowed_bytes = self.max_total_log_suze_mb * 1024 * 1024
+            max_allowed_bytes = self.max_total_log_size_mb * 1024 * 1024
             if __debug__:
-                logger.info("Total size of AOD entries: %.2f MB, max allowed: %d MB", 
-                       total_size / (1024 * 1024), self.max_total_log_suze_mb)
+                logger.info("Total size of AOD entries: %.2f MB, max allowed: %.2f MB", 
+                       total_size / (1024 * 1024), self.max_total_log_size_mb)
 
             if __debug__:
                 deleted_count = 0
                 space_freed_bytes = 0
                 
             for entry in entries:
-                # In emergency mode, clean more aggressively 
-                threshold = SIZE_DELETE_THRESHOLD if not self.emergency_mode else 0.8
-                if total_size <= max_allowed_bytes * threshold:
+                if total_size <= max_allowed_bytes * SIZE_DELETE_THRESHOLD:
                     break
                 size = entry_size(entry)
                 try:
@@ -197,8 +173,7 @@ class SpaceWatcher:
                     if __debug__:
                         deleted_count += 1
                         space_freed_bytes += size
-                        cleanup_mode = "EMERGENCY" if self.emergency_mode else "NORMAL"
-                        logger.debug("[%s] Deleted entry %s (%.1f KB)", cleanup_mode, entry, size / 1024)
+                        logger.debug("Deleted entry %s (%.1f KB)", entry, size / 1024)
                 except (FileNotFoundError, PermissionError, OSError) as e:
                     logger.warning("Failed to delete %s: %s", entry, e)
 
@@ -209,12 +184,11 @@ class SpaceWatcher:
                 
                 # Log comprehensive metrics every 5 cleanup runs
                 if self.cleanup_runs % 5 == 0:
-                    logger.debug("SpaceWatcher metrics: runs=%d, files_deleted=%d, space_freed=%.1fMB, emergency_cleanups=%d", 
-                               self.cleanup_runs, self.total_files_deleted, self.total_space_freed_mb, self.emergency_cleanups)
+                    logger.debug("SpaceWatcher metrics: runs=%d, files_deleted=%d, space_freed=%.1fMB", 
+                               self.cleanup_runs, self.total_files_deleted, self.total_space_freed_mb)
 
-                cleanup_mode = "EMERGENCY" if self.emergency_mode else "Normal"
-                logger.info("%s size-based cleanup complete. Deleted %d entries (%.1f MB freed). Total size now: %.2f MB", 
-                           cleanup_mode, deleted_count, space_freed_bytes / (1024 * 1024), total_size / (1024 * 1024))
+                logger.info("Size-based cleanup complete. Deleted %d entries (%.1f MB freed). Total size now: %.2f MB", 
+                           deleted_count, space_freed_bytes / (1024 * 1024), total_size / (1024 * 1024))
         except Exception as e:
             logger.error("Size-based cleanup failed completely: %s", e)
             if __debug__:
