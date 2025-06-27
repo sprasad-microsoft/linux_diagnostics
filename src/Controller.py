@@ -11,10 +11,10 @@ import os
 import signal
 from functools import partial
 import time
-import traceback
 import ctypes
 import ctypes.util
 import logging
+import syslog
 
 
 from shared_data import ALL_SMB_CMDS
@@ -45,6 +45,7 @@ class Controller:
     def __init__(self, config_path: str):
         """Manages configuration, starts and supervises all service components,
         and coordinates graceful shutdown."""
+
         if __debug__:
             logger.info("Initializing Controller with config: %s", config_path)
         self.stop_event = threading.Event()
@@ -91,6 +92,7 @@ class Controller:
                     time.sleep(1)  # Wait before restarting
                     if __debug__:
                         logger.info("Restarting %s thread", thread_name)
+                    syslog.syslog(syslog.LOG_WARNING, f"AOD component {thread_name} restarted due to unexpected exit")
 
         t = threading.Thread(target=runner, name=thread_name, daemon=True)
         t.start()
@@ -119,6 +121,7 @@ class Controller:
                                  process_name, process.returncode)
                     if __debug__:
                         self.process_restarts += 1
+                    syslog.syslog(syslog.LOG_WARNING, f"AOD component {process_name} restarted due to unexpected exit")
                     break
             if self.stop_event.is_set():
                 try:

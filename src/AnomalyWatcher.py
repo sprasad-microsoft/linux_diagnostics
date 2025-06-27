@@ -4,6 +4,7 @@ handlers."""
 import logging
 import queue
 import time
+import syslog
 import numpy as np
 
 from shared_data import MAX_WAIT
@@ -115,6 +116,7 @@ class AnomalyWatcher:
                 
                 if len(masked_batch) > 0 and handler.detect(masked_batch):
                     action = self._generate_action(anomaly_type)
+                    syslog.syslog(syslog.LOG_ALERT, f"AOD detected anomaly: {anomaly_type.value} with {len(masked_batch)} events")
                     self.controller.anomalyActionQueue.put(action)
                     if __debug__:
                         total_anomalies_detected += 1
