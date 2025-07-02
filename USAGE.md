@@ -170,16 +170,75 @@ The AOD system is designed to be extensible. You can add new anomaly detectors a
 Let's walk through the process using the `error` anomaly and `smbiosnoop` eBPF tool as a concrete example.
 
 **Step 1: Add the eBPF Tool**
-First, you need the eBPF tool that will produce the data. For this example, assume you have a compiled `smbiosnoop` tool that traces SMB error codes and prints them to standard output. You would place this tool in a directory like `/usr/local/bin/` so the AOD service can execute it.
+First, you need the eBPF tool that will produce the data. For this example, assume you have a compiled `smbiosnoop` tool that traces SMB error codes and prints them to standard output. 
+You would place this tool in a directory like `/usr/local/bin/` so the AOD service can execute it.
 
-**Step 2: Create the Anomaly Handler**
-Create a new Python file in `src/handlers/`, for example, `error_anomaly_handler.py`. This handler will be responsible for running the eBPF tool and parsing its output.
+**Step 2: Add code to execute the eBPF Tool in the Controller**
 
-**Step 3: Register the New Handler**
-In `src/Controller.py`, import and register your new handler type so the `AnomalyWatcher` knows about it.
+1. Add the `"tool_name": self._get_toolname_cmd` in `self.tool_cmd_builders` in `__init__`
+```python
+#src/Controller.py
+
+# ... existing code ...
+
+    def __init__(self, config_path: str):
+
+        # ... existing code ...
+
+        self.tool_cmd_builders = {
+            "smbslower": self._get_smbsloweraod_cmd,
+            "smbiosnoop": self._get_smbiosnoop_cmd,
+        }
+
+        # ... existing code ...
+
+# ... existing code ...
+
+```
+
+2. add a `_get_toolname_cmd` function
+calculate whichever params you want, 
+find the path to the ebpf binary you want to execute (look at the example)
+and return the command array
+```python
+#src/Controller.py
+
+# ... existing code ...
+
+def _get_smbiosnoop_cmd(self) -> list[str]:
+
+        #calculate whichever params you want
+        
+        ebpf_binary_path = os.path.join(os.path.dirname(__file__), "bin", "smbiosnoop")
+        return [ebpf_binary_path, params]   # return the ebpf command you want to run (params not necessary)
+
+# ... existing code ...
+
+```
+
+**Step 3: Create the Anomaly Handler**
+Create a new Python file in `src/handlers/`, for example, `error_anomaly_handler.py`.
+```python
+# src/handlers/error_anomaly_handler.py
+
+import numpy as np
+from base.AnomalyHandlerBase import AnomalyHandler
+
+class LatencyAnomalyHandler(AnomalyHandler):
+
+        def __init__(self, error_config):
+                super().__init__(error_config)
+                # add anything else you want to initialize
+
+        def detect(self, events_batch: np.ndarray) -> bool:
+                # add logic to analyze the events_batch and return true if an anomaly is detected, else false
+```
+
+**Step 4: Register the New Handler**
+In `src/AnomalyWatcher.py`, import and register your new handler type so the `AnomalyWatcher` knows about it.
 
 ```python
-# src/Controller.py
+# src/AnomalyWatcher.py
 
 # ... other imports
 from handlers.latency_anomaly_handler import LatencyAnomalyHandler
@@ -193,11 +252,10 @@ from handlers.error_anomaly_handler import ErrorAnomalyHandler # <-- Add this im
 # ... existing code ...
 ```
 
-**Step 4: Update the Configuration Schema**
-In `src/utils/config_schema.py`, add the validation schema for your new anomaly type to ensure user configurations are correct.
 
 **Step 5: Update `config.yaml`**
 Finally, add the configuration for your new anomaly to `config/config.yaml`.
+Follow the config schema specified in `src/utils/config_schema.py`
 
 ```yaml
 # config/config.yaml
@@ -219,15 +277,50 @@ guardian:
         - journalctl
 ```
 
+**Step 6: Update `ConfigManager.py`**
+
+```python
+#src/ConfigManager.py
+
+# ... existing code ...
+
+        def _get_track_for_anomaly(self, anomaly: dict):
+                
+                # ... existing code ...
+
+                dispatch = {
+                    AnomalyType.LATENCY: self._get_latency_track_cmds,
+                    AnomalyType.ERROR: self._get_error_track_cmds, # <-- Add this line
+                    # Add more types here as needed
+                }
+        
+                # ... existing code ...
+
+        def _get_error_track_cmds(self, anomaly):
+                # Add logic to get the track cmds you want 
+                # return the track cmds
+
+# ... existing code ...
+
+```
+
+
+
 ### Adding a New Quick Action
 
 Quick Actions are simple, standalone diagnostic commands that are triggered when any anomaly is detected.
 
 **Step 1: Create the Quick Action Class**
-Create a new file in `src/handlers/`, for example, `LsofQuickAction.py`.
+Create a new file `ToolQuickAction.py` in `src/handlers/`, for example, `LsofQuickAction.py`.
 
-**Step 2: Implement the `collect` Method**
-The class must inherit from `QuickAction` and implement the `collect` method. This method contains the logic for gathering the diagnostic data. For example, to capture the output of network connections using `lsof`:
+**Step 2: Implement the `get_command` Method**
+The class must inherit from `QuickAction` and implement the get_command method. 
+In the `__init__`, specify the name of the log file you want as shown in the example.
+Initialize any params if u want.
+get_command shld return a list consisting of the following: array of the cmd u want to implement, "cmd"/"cat"
+cmd ->  need a seperate process to implement this task.
+cat ->  simple cat operation
+For example, to capture the output of network connections using `lsof`:
 
 ```python
 # src/handlers/LsofQuickAction.py
@@ -236,44 +329,55 @@ from pathlib import Path
 from base.QuickAction import QuickAction
 
 class LsofQuickAction(QuickAction):
-    def __init__(self, output_path: Path):
-        super().__init__(output_path)
-
-    @property
-    def name(self) -> str:
-        return "lsof"
-
-    def collect(self):
+    def __init__(self, batches_root: str, params):
+        """Args:
+            batches_root (str): Root directory for log batches.
+            params: You can add any params if you want
         """
-        Runs 'lsof -i' to list open files with network connections
-        and saves the output to a log file.
-        """
-        # The command to be executed.
-        cmd = ["lsof", "-i"]
+        super().__init__(batches_root, "lsof.log")   # lsof.log is the name of the log file
+        # can add any self.params if u want
+
+    def get_command(self) -> list:
+        return ["lsof","-i"], "cmd"
+        # return array of cmd u want to run , whether it is a cmd or cat 
         
-        # Define the output file path.
-        output_file = self.output_path / "lsof_output.log"
         
-        try:
-            # Execute the command and capture the output.
-            result = subprocess.run(
-                cmd,
-                capture_output=True,
-                text=True,
-                check=True
-            )
-            # Write the standard output to the log file.
-            with open(output_file, "w") as f:
-                f.write(result.stdout)
-        except (subprocess.CalledProcessError, FileNotFoundError) as e:
-            # If the command fails or is not found, write the error.
-            with open(output_file, "w") as f:
-                f.write(f"Error executing '{' '.join(cmd)}': {e}")
 
 ```
 
-**Step 3: Update `config.yaml`**
-Add the name of your new action to the `watcher: actions:` list in `config/config.yaml`. The name must match the `@property def name()` in your class.
+**Step 3: Add Quick Action in the Log Collector**
+Import the ToolQuickAction you created from the handlers class
+eg. Import the LsofQuickAction from handlers.LsofQuickAction.
+In the Log Collector's `__init__`, update the `self.action_factory` add `"toolname": lambda: ToolQuickAction()
+
+
+```python
+#src/LogCollector.py
+
+# ... existing code ...
+from handlers.LsofQuickAction import LsofQuickAction
+# ... existing code ...
+
+class LogCollector:
+    def __init__(self, controller):
+        # ... existing code ...
+        self.action_factory = {
+            "journalctl": lambda: JournalctlQuickAction(self.aod_output_dir, self.anomaly_interval),
+            "stats": lambda: CifsstatsQuickAction(self.aod_output_dir),
+            "debugdata": lambda: DebugDataQuickAction(self.aod_output_dir),
+            "dmesg": lambda: DmesgQuickAction(self.aod_output_dir, self.anomaly_interval),
+            "mounts": lambda: MountsQuickAction(self.aod_output_dir),
+            "smbinfo": lambda: SmbinfoQuickAction(self.aod_output_dir),
+            "syslogs": lambda: SysLogsQuickAction(self.aod_output_dir, num_lines=100),
+        }
+        # ... existing code ...
+
+# ... existing code ...
+
+
+
+**Step 4: Update `config.yaml`**
+Add the name of your new action to the `watcher: actions:` list in `config/config.yaml`. The name must match the toolname you gave in the previous step.
 
 ```yaml
 # config/config.yaml
