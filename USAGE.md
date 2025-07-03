@@ -316,7 +316,7 @@ Create a new file `ToolQuickAction.py` in `src/handlers/`, for example, `LsofQui
 **Step 2: Implement the `get_command` Method**
 The class must inherit from `QuickAction` and implement the get_command method. 
 In the `__init__`, specify the name of the log file you want as shown in the example.
-Initialize any params if u want.
+Initialize any params if u want. (Note that it is not compulsory)
 get_command shld return a list consisting of the following: array of the cmd u want to implement, "cmd"/"cat"
 cmd ->  need a seperate process to implement this task.
 cat ->  simple cat operation
@@ -348,7 +348,7 @@ class LsofQuickAction(QuickAction):
 **Step 3: Add Quick Action in the Log Collector**
 Import the ToolQuickAction you created from the handlers class
 eg. Import the LsofQuickAction from handlers.LsofQuickAction.
-In the Log Collector's `__init__`, update the `self.action_factory` add `"toolname": lambda: ToolQuickAction()
+In the Log Collector's `__init__`, update the `self.action_factory` add `"toolname": lambda: ToolQuickAction(self.aod_output_dir, params)`
 
 
 ```python
@@ -363,17 +363,15 @@ class LogCollector:
         # ... existing code ...
         self.action_factory = {
             "journalctl": lambda: JournalctlQuickAction(self.aod_output_dir, self.anomaly_interval),
-            "stats": lambda: CifsstatsQuickAction(self.aod_output_dir),
-            "debugdata": lambda: DebugDataQuickAction(self.aod_output_dir),
-            "dmesg": lambda: DmesgQuickAction(self.aod_output_dir, self.anomaly_interval),
-            "mounts": lambda: MountsQuickAction(self.aod_output_dir),
-            "smbinfo": lambda: SmbinfoQuickAction(self.aod_output_dir),
+            # ... existing code ...
             "syslogs": lambda: SysLogsQuickAction(self.aod_output_dir, num_lines=100),
+            "lsof": lambda: LsofQuickAction(self.aod_output_dir, params)  # <-- Add this line, and params as per what u specified in the previous step
         }
         # ... existing code ...
 
 # ... existing code ...
 
+```
 
 
 **Step 4: Update `config.yaml`**
