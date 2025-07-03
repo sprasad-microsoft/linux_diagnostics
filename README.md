@@ -64,19 +64,6 @@ Each component runs in its own dedicated thread with proper lifecycle management
 - Thread naming for easy identification in system monitoring tools
 - Automatic restart of threads/processes if they stop unexpectedly
 
-## 🔄 Real-Time Processing Pipeline
-
-AODv2's real-time processing system is built around an efficient event streaming architecture with minimal kernel-user mode transitions.
-
-### Event Collection Layer
-
-**eBPF Monitoring Tools**:
-- `smbsloweraod`: Kernel-level SMB command latency monitoring with microsecond precision
-
-**Shared Memory Ring Buffer**:
-- Zero-copy event transfer from kernel eBPF to user space
-- Batch processing to minimize context switches
-- Configurable buffer sizes for high-throughput workloads
 
 ### Stream Processing
 
@@ -84,14 +71,13 @@ AODv2's real-time processing system is built around an efficient event streaming
 1. **Kernel Events**: eBPF programs capture SMB operations and write to the shared memory ring buffer.
 2. **EventDispatcher**: Polls the ring buffer, converts C structs to numpy arrays, and queues events.
 3. **Batch Processing**: AnomalyWatcher processes events in configurable intervals (`watch_interval_sec`)
-4. **Anomaly Analysis**: Specialized handlers analyze events against thresholds
+4. **Anomaly Analysis**: Specialized handlers analyze events (against thresholds for Latency Anomaly Handler)
 5. **Action Triggering**: Anomaly events queued for diagnostic collection
 6. **Log Collection**: Async execution of QuickActions with semaphore-based concurrency control
 
 **Processing Characteristics**:
 - **No Event Loss**: Ring buffer design ensures all events are captured and analyzed
 - **Configurable Intervals**: Default 1-second batch processing with sub-second detection capability
-- **Fault Tolerance**: Individual component failures don't stop the processing pipeline
 - **Automatic Recovery**: Thread supervision with automatic restart on failures
 
 ### Anomaly Detection Algorithms
@@ -101,16 +87,12 @@ AODv2's real-time processing system is built around an efficient event streaming
 - Configurable acceptable violation counts within batch intervals
 - Emergency detection for operations exceeding 1-second thresholds (immediate trigger)
 
-**Error Pattern Detection**:
-- Error code frequency analysis with configurable tracking lists
-- Batch-based evaluation against acceptable error rates
-
 ### Diagnostic Collection Pipeline
 
 **Asynchronous Collection System**:
 - Semaphore-bounded async tasks (default: 4 concurrent collections)
 - QuickAction execution for targeted diagnostic gathering
-- Zstd compression for fast log archival (2-3x faster than gzip)
+- Zstd compression
 - Structured output organization with timestamp-based batch directories
 
 ## 📁 Project Structure
@@ -154,7 +136,7 @@ linux_diagnostics/
 
 ### Installation
 
-#### From Packages (Recommended)
+#### From Packages (Recommended)  (not yet implemented)
 
 **Debian/Ubuntu:**
 ```bash
@@ -181,14 +163,14 @@ cd linux_diagnostics
 # Install dependencies from pyproject.toml
 pip3 install .
 
-# Configure (see configuration section below) and install the service
+# Configure (see configuration section below) and install the service (not yet implemented)
 sudo cp config/config.yaml /etc/linux_diagnostics/
 sudo cp linux_diagnostics.service /etc/systemd/system/
 sudo systemctl daemon-reload
 sudo systemctl enable linux_diagnostics.service
 ```
 
-### Basic Usage
+### Basic Usage (not yet implemented)
 
 **Start the service:**
 ```bash
@@ -209,6 +191,27 @@ sudo journalctl -u linux_diagnostics.service -f
 ```bash
 sudo systemctl stop linux_diagnostics.service
 ```
+
+### How to run AOD as a python code
+
+
+```
+cd /path/to/linux_diagnostics
+sudo python3 src/Controller.py
+```
+
+**Run AOD in different log levels**
+```
+cd /path/to/linux_diagnostics
+sudo AOD_LOG_LEVEL=DEBUG python3 src/Controller.py
+```
+
+**Run AOD with minimal logging/metric calculation overhead**
+```
+cd /path/to/linux_diagnostics
+sudo python3 -O src/Controller.py
+```
+
 
 ## ⚙️ Configuration
 
