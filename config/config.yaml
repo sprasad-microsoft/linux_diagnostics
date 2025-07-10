@@ -3,7 +3,6 @@ aod_output_dir: /var/log/aod
 
 watcher:
   actions:
-    - tcpdump
     - dmesg
     - journalctl
     - debugdata

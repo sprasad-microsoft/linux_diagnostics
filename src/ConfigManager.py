@@ -162,9 +162,7 @@ class ConfigManager:
         exclude_set = set(exclude_codes)
         return {idx: None for idx, code in enumerate(ALL_ERROR_CODES) if code not in exclude_set}
 
-    def _normalize_track_and_exclude(
-        self, mode: str, track_items, exclude_items, anomaly_type: str = "anomaly"
-    ):
+    def _normalize_track_and_exclude(self, mode: str, track_items, exclude_items, anomaly_type: str = "anomaly"):
         """Normalize track and exclude items based on the mode.
 
         Warns and clears the irrelevant list if needed.

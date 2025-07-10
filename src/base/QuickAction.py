@@ -70,7 +70,6 @@ class QuickAction(ABC):
                     logger.debug("%s metrics: success=%d, failures=%d, success_rate=%.1f%%, avg_time=%.2fs", 
                                self.__class__.__name__, self.executions, self.failures, success_rate, avg_time)
 
-
     async def collect_cat_output(self, in_path: str, out_path: str) -> None:
         in_path = Path(in_path)
         out_path = Path(out_path)

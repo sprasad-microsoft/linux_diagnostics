@@ -38,10 +38,10 @@ class AnomalyWatcher:
         self.handlers: dict[AnomalyType, AnomalyHandler] = self._load_anomaly_handlers(
             controller.config
         )
-        self.total_count = 0
 
         # Initialize metrics tracking attributes
         if __debug__:
+            self.total_count = 0
             self.events_by_tool = {}
             self.anomaly_counts = {anomaly_type: 0 for anomaly_type in ANOMALY_HANDLER_REGISTRY.keys()}
 

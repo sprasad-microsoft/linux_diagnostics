@@ -74,7 +74,6 @@ class Controller:
         if __debug__:
             logger.info("Controller initialization complete")
 
-
     def _supervise_thread(self, thread_name: str, target: callable, *args, **kwargs) -> None:
         """Start and supervise a thread, restarting it if it dies
         unexpectedly."""
