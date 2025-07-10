@@ -24,11 +24,12 @@ class SpaceWatcher:
         self.max_log_age_days = cleanup_config.get("max_log_age_days", 2)  # Default to 2 days if not set
         self.max_total_log_size_mb = cleanup_config.get("max_total_log_size_mb", 200)  # Default to 200 MB if not set
         self.cleanup_interval = cleanup_config.get("cleanup_interval_sec", 60)  # Default to 60 sec if not set
-        self.aod_output_dir = cleanup_config.get(
-            "aod_output_dir", "/var/log/aod"
-        )  # Default to /var/log/aod if not set
+        self.aod_output_dir = cleanup_config.get("aod_output_dir", "/var/log/aod")  # Default to /var/log/aod if not set
         self.batches_dir = Path(os.path.join(self.aod_output_dir, "batches"))
-        self.last_full_cleanup = time.time()
+        self.last_full_cleanup = time.time() - self.max_log_age_days * 24 * 60 * 60  # Initialize to ensure first cleanup runs immediately
+        
+        # Compression configuration - matches LogCollector's compression method
+        self.compression_extension = ".tar.zst"  # Could be made configurable via config file
         
         # Metrics tracking
         if __debug__:
@@ -65,9 +66,9 @@ class SpaceWatcher:
         return False
 
     def _check_space(self) -> bool:
-        """Check if disk space is below a threshold using pathlib, only counting tar.zst files."""
+        """Check if disk space is below a threshold using pathlib, only counting compressed files."""
         try:
-            total_size = sum(f.stat().st_size for f in self.batches_dir.glob("**/*.tar.zst") if f.is_file())
+            total_size = sum(f.stat().st_size for f in self.batches_dir.glob(f"**/*{self.compression_extension}") if f.is_file())
             total_size_mb = total_size / (1024 * 1024)
             max_size_mb = self.max_total_log_size_mb
 
@@ -110,7 +111,7 @@ class SpaceWatcher:
             for entry in to_delete:
                 try:
                     if __debug__:
-                        size = entry.stat().st_size if entry.is_file() and entry.name.endswith('.tar.zst') else sum(f.stat().st_size for f in entry.glob("**/*.tar.zst") if f.is_file())
+                        size = entry.stat().st_size if entry.is_file() and entry.name.endswith(self.compression_extension) else sum(f.stat().st_size for f in entry.glob(f"**/*{self.compression_extension}") if f.is_file())
                     shutil.rmtree(entry) if entry.is_dir() else entry.unlink()
                     if __debug__:
                         deleted_count += 1
@@ -147,9 +148,9 @@ class SpaceWatcher:
             def entry_size(e):
                 try:
                     if e.is_file():
-                        return e.stat().st_size if e.name.endswith('.tar.zst') else 0
+                        return e.stat().st_size if e.name.endswith(self.compression_extension) else 0
                     else:
-                        return sum(f.stat().st_size for f in e.glob("**/*.tar.zst") if f.is_file())
+                        return sum(f.stat().st_size for f in e.glob(f"**/*{self.compression_extension}") if f.is_file())
                 except (FileNotFoundError, PermissionError, OSError):
                     return 0
 
