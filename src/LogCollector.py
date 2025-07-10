@@ -18,6 +18,7 @@ from utils.anomaly_type import AnomalyType
 logger = logging.getLogger(__name__)
 
 class LogCollector:
+    
     def __init__(self, controller):
         self.loop = asyncio.new_event_loop()
         self.max_concurrent_tasks = 4
@@ -70,8 +71,15 @@ class LogCollector:
             logger.info("Collecting logs for anomaly event %s", anomaly_event)
         anomaly_type = anomaly_event["anomaly"]
         batch_id = f"{anomaly_event["timestamp"]}"
+
+        handlers = self.handlers[anomaly_type]
+        if not handlers:  # Check if empty
+            if __debug__:
+                logger.warning("No handlers configured for anomaly type %s, skipping collection", anomaly_type)
+            return
+
         await asyncio.gather(
-            *[handler.execute(batch_id) for handler in self.handlers[anomaly_type]]
+            *[handler.execute(batch_id) for handler in handlers]
         )
         output_path = self.handlers[anomaly_type][0].get_output_dir(batch_id)
         
