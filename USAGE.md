@@ -7,7 +7,8 @@ This document provides advanced guidance for developers and power users, includi
 ### System Requirements
 
 **Operating System:**
-- Linux (for eBPF support)
+- Linux kernel 5.15+ with eBPF support
+- Note: Future eBPF scripts will require kernel 6.8+
 
 **Permissions:**
 - Root access required for eBPF program loading and system monitoring

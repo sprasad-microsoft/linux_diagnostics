@@ -13,8 +13,8 @@ Real-time monitoring and automated diagnostics collection system for Linux envir
 ## 🚀 How to Run
 
 ### Prerequisites
-- Linux kernel 4.15+ with eBPF support
-- Python 3.8+
+- Linux kernel 5.15+ with eBPF support (6.8+ required for future eBPF scripts)
+- Python 3.9+
 - Root access for eBPF program loading
 
 ### Clone and Run

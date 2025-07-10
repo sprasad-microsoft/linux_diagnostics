@@ -290,7 +290,7 @@ AOD component {component_name} restarted due to unexpected exit
 ### Prerequisites
 - **Python Version:** Python 3.9 or higher (based on project configuration)
 - **Root Access:** Required for eBPF program access and system monitoring
-- **Linux Environment:** Designed for Linux systems with eBPF support
+- **Linux Environment:** Designed for Linux systems with kernel 5.15+ eBPF support (6.8+ required for future eBPF scripts)
 
 ### Installation Flow
 1. **Python Version Check:** Verify Python 3.9+ is available: `python3 --version`
