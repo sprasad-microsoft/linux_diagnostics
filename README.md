@@ -1,105 +1,136 @@
-# Linux Diagnostics Controller Daemon
+# Linux Diagnostics Controller (AODv2)
 
-This project is a Linux diagnostics controller daemon that monitors system performance and runs diagnostics based on specified anomalies. It is designed to be packaged for easy installation on Debian and RPM-based systems.
+Real-time monitoring and automated diagnostics collection system for Linux environments using eBPF tools to detect anomalies and collect diagnostic data.
 
-## Project Structure
+## 🎯 Key Features
 
-- `src/linux_diagnostics_controller`: Contains the main logic for the Linux diagnostics controller daemon, handling configuration and diagnostics execution.
-- `config/config.yaml`: Configuration file for the daemon. Users can customize the behavior of the diagnostics controller here.
-- `packages/debian/`: Contains files necessary for building the DEB package.
-  - `control`: Package metadata including name, version, maintainer, dependencies, and description.
-  - `postinst`: Script executed after the DEB package is installed to enable and start the systemd service.
-  - `prerm`: Script executed before the DEB package is removed to stop and disable the systemd service.
-  - `rules`: Defines the build process for the DEB package.
-- `packages/rpm/`: Contains files necessary for building the RPM package.
-  - `linux_diagnostics.spec`: RPM package specification including name, version, release, summary, license, and installation/uninstallation scripts.
-  - `postinstall.sh`: Script executed after the RPM package is installed to enable and start the systemd service.
-  - `preuninstall.sh`: Script executed before the RPM package is removed to stop and disable the systemd service.
-- `README.md`: Documentation for the project.
-- `Makefile`: Defines the build commands for creating the DEB and RPM packages.
+- **Real-time Anomaly Detection**: Sub-second detection of latency spikes and error patterns
+- **Automated Diagnostics**: Instant collection of relevant system data when anomalies occur
+- **Low Overhead Monitoring**: eBPF-based tools with minimal performance impact
+- **Configurable Thresholds**: Customizable detection parameters for different environments
+- **Intelligent Cleanup**: Automatic disk space management
 
-## Instructions to Build Packages
+## 🚀 How to Run
 
-### Build DEB Package
-1. Navigate to the project root directory:
-   ```
-   cd /path/to/linux_diagnostics
-   ```
-2. Run the following command to build the DEB package:
-   ```
-   make debian
-   ```
-3. The DEB package will be created in the parent directory of `packages/debian`.
+### Prerequisites
+- Linux kernel 5.15+ with eBPF support (6.8+ required for future eBPF scripts)
+- Python 3.9+
+- Root access for eBPF program loading
 
-### Build RPM Package
-1. Navigate to the project root directory:
-   ```
-   cd /path/to/linux_diagnostics
-   ```
-2. Run the following command to build the RPM package:
-   ```
-   make rpm
-   ```
-3. The RPM package will be created in the `~/rpmbuild/RPMS/noarch/` directory.
+### Clone and Run
+```bash
+# Check Python version (requires 3.9+)
+python3 --version
 
-## Installing the Packages
+# Clone repository
+git clone <repository-url>
+cd linux_diagnostics
 
-### Install DEB Package
-1. Use `dpkg` to install the DEB package:
-   ```
-   sudo dpkg -i ../linux_diagnostics_1.0-1_all.deb
-   ```
-2. If there are missing dependencies, resolve them using:
-   ```
-   sudo apt-get install -f
-   ```
+# Install dependencies
+pip3 install -r requirements.txt
 
-### Install RPM Package
-1. Use `rpm` to install the RPM package:
-   ```
-   sudo rpm -ivh ~/rpmbuild/RPMS/noarch/linux_diagnostics-1.0-1.noarch.rpm
-   ```
+# Run the application
+sudo python3 src/Controller.py 
 
-## Managing the Service
-After installation, the `linux_diagnostics` service will be installed and managed by `systemd`.
+# With debug logging
+sudo AOD_LOG_LEVEL=DEBUG python3 src/Controller.py 
 
-### Start the Service
-```
-sudo systemctl start linux_diagnostics.service
+# With minimal overhead
+sudo python3 -O src/Controller.py 
 ```
 
-### Enable the Service to Start on Boot
-```
-sudo systemctl enable linux_diagnostics.service
-```
-
-### Check the Service Status
-```
-sudo systemctl status linux_diagnostics.service
+### Stop the Application
+```bash
+# Graceful shutdown with Ctrl+C
+Ctrl+C
 ```
 
-### Stop the Service
+## 📚 Documentation
+
+For comprehensive documentation, see the [docs/](docs/) directory:
+
+- **[Architecture Guide](docs/ARCHITECTURE.md)** - System architecture and design
+- **[Configuration Guide](docs/CONFIGURATION.md)** - Configuration options and examples
+- **[API Reference](docs/API_REFERENCE.md)** - Complete API documentation for all classes and functions
+- **[Usage Guide](USAGE.md)** - Advanced usage and monitoring tools
+
+## 🏗️ System Architecture
+
+AODv2 implements a multi-threaded architecture with five core components operating in a coordinated producer-consumer model:
+
+### Core Components
+
+- **Controller**: Main orchestrator managing all components, handles process lifecycle, thread supervision with automatic restart capabilities, and graceful shutdown coordination
+- **EventDispatcher**: Collects events from eBPF programs via shared memory ring buffer, converts C structs to NumPy arrays, and queues events for analysis
+- **AnomalyWatcher**: Analyzes event batches using pluggable handlers, detects anomalies based on configurable thresholds, and triggers diagnostic collection
+- **LogCollector**: Executes diagnostic collection actions using async semaphore-bounded tasks, compresses logs with zstd, and organizes output by timestamp
+- **SpaceWatcher**: Monitors disk usage autonomously, performs size-based and age-based cleanup to prevent disk space exhaustion
+
+### Communication Flow
+
 ```
-sudo systemctl stop linux_diagnostics.service
+eBPF Programs → Shared Memory → EventDispatcher → eventQueue → AnomalyWatcher → anomalyActionQueue → LogCollector
 ```
 
-## Uninstalling the Packages
+**Inter-component Communication:**
+- **Event Queue**: Thread-safe queue carrying monitoring events (NumPy arrays) from EventDispatcher to AnomalyWatcher
+- **Anomaly Action Queue**: Task queue carrying anomaly actions from AnomalyWatcher to LogCollector
+- **Shared Memory**: Ring buffer for lock-free communication between eBPF and Python processes
 
-### Uninstall DEB Package
+### Processing Model
+
+**Event Processing:**
+1. eBPF programs capture SMB events and write to shared memory ring buffer
+2. EventDispatcher polls ring buffer, batches events for efficiency 
+3. AnomalyWatcher processes events in configurable intervals with specialized handlers
+4. Detected anomalies trigger LogCollector to execute QuickActions asynchronously
+5. SpaceWatcher maintains disk space by cleaning old logs based on size/age thresholds
+
+**Fault Tolerance:**
+- Thread supervision with automatic restart on component failures
+- Graceful shutdown with proper resource cleanup
+- No event loss through ring buffer design and batch processing
+
+For detailed architecture information, see the [Architecture Guide](docs/ARCHITECTURE.md).
+
+## 📁 Project Structure
+
 ```
-sudo dpkg -r linux_diagnostics
+linux_diagnostics/
+├── src/                          # Core application source code
+│   ├── Controller.py             # Main service controller and orchestrator
+│   ├── AnomalyWatcher.py         # Anomaly detection engine
+│   ├── EventDispatcher.py        # Event routing from eBPF to Python
+│   ├── LogCollector.py           # Diagnostic data collection and compression
+│   ├── SpaceWatcher.py           # Disk usage monitoring and cleanup
+│   ├── ConfigManager.py          # Configuration loading and validation
+│   ├── shared_data.py            # Shared constants (e.g., SMB commands, error codes)
+│   ├── base/                     # Abstract base classes for core components
+│   │   ├── AnomalyHandlerBase.py # Interface for anomaly handlers
+│   │   └── QuickAction.py        # Interface for diagnostic actions
+│   ├── handlers/                 # Concrete implementations of handlers and actions
+│   │   ├── latency_anomaly_handler.py    # Logic for latency anomaly detection
+│   │   ├── error_anomaly_handler.py      # Logic for error anomaly detection
+│   │   └── ...                   # Implementations of all QuickActions
+│   ├── utils/                    # Utility modules and helper functions
+│   │   ├── anomaly_type.py       # Enum for anomaly types
+│   │   └── config_schema.py      # Dataclasses for configuration schema
+│   └── bin/                      # Compiled eBPF binaries
+│       └── smbsloweraod          # eBPF tool for monitoring SMB latency
+├── config/                       # Configuration files
+│   └── config.yaml               # Main configuration file (user-editable)
+├── packages/                     # Package building scripts (DEB and RPM)
+├── tests/                        # Test suite for the application
+│   ├── test_controller.py        # Unit tests for the Controller
+│   └── ...                       # Other unit and integration tests
+├── linux_diagnostics.service     # Systemd service definition file
+├── Makefile                      # Build automation for packages and code quality
+├── pyproject.toml                # Python project configuration (PEP 621)
+├── USAGE.md                      # Detailed usage and configuration guide
+└── README.md                     # This file (overview and architecture)
 ```
 
-### Uninstall RPM Package
-```
-sudo rpm -e linux_diagnostics
-```
 
-## Cleaning Up
-To clean up build artifacts, run:
-```
-make clean
-```
 
-## License
-This project is licensed under the MIT License.
+
+
